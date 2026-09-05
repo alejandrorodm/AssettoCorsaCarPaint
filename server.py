@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from acpaint import __version__, cars, dds, gltf, kn5
+from acpaint import __version__, cars, dds, gltf, kn5, patterns
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(ROOT, "cache")
@@ -247,6 +247,69 @@ def api_decal(car: str, skin: str, name: str):
     if not os.path.isfile(p):
         raise HTTPException(404)
     return FileResponse(p, media_type="image/png")
+
+
+# ------------------------------------------------------------------ biblioteca global y patrones
+LIB = os.path.join(ROOT, "library")
+os.makedirs(LIB, exist_ok=True)
+
+
+@app.get("/api/library")
+def api_library():
+    return sorted((f for f in os.listdir(LIB) if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".svg"))), key=str.lower)
+
+
+@app.post("/api/library")
+async def api_library_upload(request: Request, name: str = "imagen.png"):
+    body = await request.body()
+    base = cars._check(os.path.basename(name))
+    if base.lower().endswith(".svg"):
+        path = os.path.join(LIB, base)
+        with open(path, "wb") as f:
+            f.write(body)
+        return {"ok": True, "name": base}
+    from PIL import Image as _I
+    try:
+        im = _I.open(io.BytesIO(body)).convert("RGBA")
+    except Exception:
+        raise HTTPException(400, "formato de imagen no reconocido")
+    if im.width > 2048 or im.height > 2048:
+        im.thumbnail((2048, 2048))
+    base = os.path.splitext(base)[0] + ".png"
+    im.save(os.path.join(LIB, base), "PNG")
+    return {"ok": True, "name": base}
+
+
+@app.get("/api/library/{name}")
+def api_library_get(name: str):
+    p = os.path.join(LIB, cars._check(name))
+    if not os.path.isfile(p):
+        raise HTTPException(404)
+    return FileResponse(p, headers={"Cache-Control": "max-age=60"})
+
+
+@app.delete("/api/library/{name}")
+def api_library_del(name: str):
+    p = os.path.join(LIB, cars._check(name))
+    if os.path.isfile(p):
+        os.remove(p)
+    return {"ok": True}
+
+
+@app.get("/api/patterns")
+def api_patterns():
+    return [{"name": n, "label": l} for n, l in patterns.PATTERNS]
+
+
+@app.get("/api/pattern/{name}.png")
+def api_pattern(name: str, c1: str = "#1a1a1a", c2: str = "#4a4a4a", size: int = 512, seed: int = 1):
+    size = max(64, min(size, 1024))
+    key = "pat_" + hashlib.md5(f"{name}|{c1}|{c2}|{size}|{seed}".encode()).hexdigest()
+    try:
+        path = _cached_file(key, ".png", lambda: patterns.make(name, c1, c2, size, seed))
+    except KeyError:
+        raise HTTPException(404, "patrón desconocido")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "max-age=3600"})
 
 
 @app.get("/api/cars/{car}/skins/{skin}/export.zip")

@@ -29,6 +29,18 @@ está en la ruta de Steam habitual. También vale la variable de entorno `AC_ROO
    - Capas: color base, rectángulo, círculo, anillo, triángulo, franja, estrella, chevrón, texto, dorsal,
      imágenes PNG (se guardan en `acpaint/decals/` de la skin) y pincel. Modos de mezcla (multiplicar,
      superponer, color…), opacidad, borde, voltear, espejo, duplicar, bloquear, orden, deshacer/rehacer.
+   - **Biblioteca** (panel izquierdo, pestañas): *Vinilos* (llamas, rayo, flechas, chevrones, bandera a
+     cuadros, franjas, swoosh, onda, líneas de velocidad, tribal, rombo, escudo, placa y círculo de dorsal,
+     estrellas, rayas de peligro, sol, puntos) coloreados con los dos colores elegidos; *Texturas*
+     procedurales (fibra de carbono, hexágonos, panal, camuflaje normal/digital, ajedrez, rayas, metal
+     cepillado, metalizado, puntos, ruido, arañazos, cuero, rejilla, rombos, chapa) que se añaden como capa
+     completa o, con una forma seleccionada, como **relleno** de esa forma (con escala); *Imágenes*: biblioteca
+     global en `library/` (logos, vinilos PNG/JPG/SVG) que se sube con el botón ＋, **arrastrando** ficheros al
+     lienzo o al 3D, o **pegando** (Ctrl+V).
+   - Relleno con **degradado** (horizontal, vertical, diagonal, radial) para cualquier forma o vinilo.
+   - **Colocar en 3D**: con la casilla activada, eliges un elemento de la biblioteca y haces clic sobre el
+     coche; se coloca justo en ese punto de la textura. Clic normal en el coche selecciona la capa que hay
+     debajo; Mayús+clic mueve la capa seleccionada a ese punto; soltar una imagen sobre el 3D la coloca ahí.
    - Plantilla **UV** (bordes de los triángulos de las mallas que usan esa textura) para colocar vinilos.
    - Vista 3D con el kn5 real (texturas de la skin + la que editas en vivo), cámaras F/L/T/R y giro.
    - **Guardar** (Ctrl+S): escribe el DDS con mips y el proyecto (`acpaint/project.json`) para reabrirlo.
@@ -42,4 +54,6 @@ está en la ruta de Steam habitual. También vale la variable de entorno `AC_ROO
   `acpaint/gltf.py` (kn5 → GLB para la vista 3D).
 - `web/` sin build: `app.js` (Fabric.js para el 2D, three.js para el 3D), librerías en `web/vendor`.
 - `tests/make_fake_car.py` crea un `content/cars` falso con un coche sintético para probar sin AC.
-- `cache/` guarda GLB, PNG de texturas y plantillas UV (se puede borrar).
+- `acpaint/patterns.py` genera las texturas procedurales (numpy/Pillow, tileables).
+- `library/` imágenes del usuario (global, ignorada por git). `cache/` guarda GLB, PNG de texturas,
+  patrones y plantillas UV (se puede borrar).

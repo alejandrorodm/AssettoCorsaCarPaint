@@ -32,6 +32,16 @@ función; resumen enumerado al acabar para que el usuario pruebe en AC).
   `CanvasTexture` a ≤1024 px que se refresca con retardo de 120 ms; `bind3DTexture` sustituye el mapa
   de los materiales cuyo `txDiffuse` es la textura en edición.
 
+- Biblioteca (`web/app.js`, bloque "biblioteca"): `VINYLS` son SVG generados en JS (dos colores) que
+  se cargan con `fabric.loadSVGFromString` → grupo (`kind:'vinyl'`); los patrones son PNG del servidor
+  (`/api/pattern/{name}.png?c1&c2`, `acpaint/patterns.py`) usados como `fabric.Pattern` (se serializa
+  la URL, así que el proyecto guarda solo la referencia); las imágenes viven en `library/` global
+  (`/api/library`) o en `acpaint/decals/` de la skin. Los props personalizados `pat/patScale/grad/grad2`
+  van en `PROPS_EXTRA`. `fillTargets(obj)` aplica rellenos a los hijos de grupos/selecciones.
+- Clic en el 3D (`pickUV`): raycast sólo contra mallas cuyo material es "live"; `hit.uv` es el UV crudo
+  del kn5 (three r160 no aplica transformaciones) → píxel = (u·W, v·H). `S.armed` guarda el elemento
+  pendiente de colocar (casilla "colocar en 3D"); Escape / cerrar editor desarma.
+
 ## Hechos verificados
 - Fabric 5.3.0 usa `textBaseline='alphabetical'` (aviso en Chrome nuevo): parcheado a `alphabetic` en
   `web/vendor/fabric.min.js`.

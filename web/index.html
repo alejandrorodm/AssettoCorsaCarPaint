@@ -5,7 +5,7 @@
 <title>AC Car Paint — editor de skins</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/web/style.css?v=1">
+<link rel="stylesheet" href="/web/style.css?v=2">
 <script src="/web/vendor/fabric.min.js"></script>
 <script type="importmap">
 {"imports": {"three": "/web/vendor/three/build/three.module.js", "three/addons/": "/web/vendor/three/examples/jsm/"}}
@@ -88,9 +88,19 @@
         <label>Grosor <input type="range" id="brush-size" min="1" max="200" value="20"></label>
         <label>Color <input type="color" id="brush-color" value="#ffffff"></label>
       </div>
-      <div id="decal-lib" class="sub">
-        <h4>Calcomanías de esta skin</h4>
-        <div id="decal-list" class="decals"></div>
+      <div id="lib" class="sub lib">
+        <div class="tabs">
+          <button data-lib="vinyls" class="active">Vinilos</button>
+          <button data-lib="patterns">Texturas</button>
+          <button data-lib="images">Imágenes</button>
+        </div>
+        <div class="row lib-colors">
+          <label>Color 1 <input type="color" id="lib-c1" value="#ffffff"></label>
+          <label>Color 2 <input type="color" id="lib-c2" value="#1a1a1a"></label>
+          <label class="chk" title="Tras elegir un elemento, haz clic sobre el coche en 3D para colocarlo justo ahí"><input type="checkbox" id="chk-place3d"> colocar en 3D</label>
+        </div>
+        <div id="lib-list" class="decals"></div>
+        <p class="hint" id="lib-hint">Clic: añade como capa. Con una forma seleccionada, clic en una textura la usa como relleno. Arrastra o pega (Ctrl+V) imágenes al lienzo.</p>
       </div>
       <h3>Capas <span class="hint">(arriba = delante)</span></h3>
       <div id="layers" class="layers"></div>
@@ -112,6 +122,7 @@
           <button id="btn-cam-rear" title="Vista trasera">R</button>
           <span id="v3d-status" class="hint"></span>
         </div>
+        <div class="viewer-hint hint">clic en el coche: seleccionar capa · Mayús+clic: mover la capa seleccionada ahí · arrastrar aquí una imagen: colocarla</div>
       </div>
       <div id="props" class="props">
         <h3>Propiedades</h3>
@@ -121,6 +132,14 @@
           <div class="row">
             <label>Relleno <input type="color" id="p-fill"></label>
             <label class="chk"><input type="checkbox" id="p-nofill"> sin relleno</label>
+          </div>
+          <div class="row">
+            <label>Relleno textura <select id="p-pattern"><option value="">— color liso —</option></select></label>
+            <label>Escala <input type="number" id="p-patscale" step="0.1" min="0.05" value="1"></label>
+          </div>
+          <div class="row">
+            <label>Degradado <select id="p-grad"><option value="">ninguno</option><option value="0">horizontal</option><option value="90">vertical</option><option value="45">diagonal</option><option value="radial">radial</option></select></label>
+            <label>Color 2 <input type="color" id="p-grad2" value="#000000"></label>
           </div>
           <div class="row">
             <label>Borde <input type="color" id="p-stroke"></label>
@@ -224,6 +243,6 @@
 </dialog>
 
 <div id="toast" hidden></div>
-<script type="module" src="/web/app.js?v=1"></script>
+<script type="module" src="/web/app.js?v=2"></script>
 </body>
 </html>

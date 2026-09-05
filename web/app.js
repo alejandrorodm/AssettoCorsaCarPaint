@@ -168,7 +168,7 @@ $('#file-import').onchange = async (e) => {
 };
 
 // ================================================================== EDITOR
-const PROPS_EXTRA = ['name', 'locked', 'kind'];
+const PROPS_EXTRA = ['name', 'locked', 'kind', 'pat', 'patScale', 'grad', 'grad2'];
 
 async function openEditor(car, skin) {
   if (S.canvas && S.car === car && S.skin === skin) return;
@@ -189,7 +189,7 @@ async function openEditor(car, skin) {
   const first = S.proj.current || (S.textures.find((t) => t.in_skin) || S.textures[0] || {}).name;
   initCanvas();
   init3D();
-  loadDecals();
+  loadLibrary();
   await load3DModel();
   if (first) { sel.value = first; await switchTexture(first); }
   else status('El coche no tiene texturas txDiffuse');
@@ -197,7 +197,7 @@ async function openEditor(car, skin) {
 
 function closeEditor() {
   if (S.canvas) { stashCurrent(); S.canvas.dispose(); S.canvas = null; }
-  S.tex = null; S.texInfo = null; S.proj = null; S.dirty = false;
+  S.tex = null; S.texInfo = null; S.proj = null; S.dirty = false; disarm();
   if (V.renderer) { V.renderer.setAnimationLoop(null); V.renderer.dispose(); V.renderer = null; V.scene = null; }
   window.removeEventListener('resize', onResize);
 }
@@ -316,7 +316,7 @@ $('#btn-undo').onclick = () => restoreHistory(S.hpos - 1);
 $('#btn-redo').onclick = () => restoreHistory(S.hpos + 1);
 
 // ------------------------------------------------------------------ añadir objetos
-const DEF = () => ({ fill: $('#brush-color').value || '#ffffff', stroke: null, strokeWidth: 0, originX: 'center', originY: 'center', left: S.W / 2, top: S.H / 2 });
+const DEF = () => ({ fill: libC1() || '#ffffff', stroke: null, strokeWidth: 0, originX: 'center', originY: 'center', left: S.W / 2, top: S.H / 2 });
 function add(obj, name, kind) {
   obj.set({ name, kind }); S.canvas.add(obj); S.canvas.setActiveObject(obj); S.canvas.requestRenderAll();
 }
@@ -347,29 +347,195 @@ function toggleBrush(force) {
 $('#brush-size').oninput = (e) => { if (S.canvas?.freeDrawingBrush) S.canvas.freeDrawingBrush.width = +e.target.value; };
 $('#brush-color').oninput = (e) => { if (S.canvas?.freeDrawingBrush) S.canvas.freeDrawingBrush.color = e.target.value; };
 
-$('#file-decal').onchange = async (e) => {
-  for (const f of e.target.files) {
+// ------------------------------------------------------------------ biblioteca: vinilos, texturas, imágenes
+const libC1 = () => $('#lib-c1').value, libC2 = () => $('#lib-c2').value;
+function checkerSvg(c1, c2, n = 8) {
+  let r = ''; const s = 200 / n;
+  for (let i = 0; i < n; i++) for (let j = 0; j < n / 2; j++) r += `<rect x="${i * s}" y="${j * s}" width="${s}" height="${s}" fill="${(i + j) % 2 ? c2 : c1}"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">${r}</svg>`;
+}
+const VINYLS = {
+  flames: { label: 'Llamas', svg: (a, b) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 100"><path fill="${b}" d="M0 100 L0 60 C20 70 30 40 40 30 C45 55 60 60 70 35 C80 60 95 55 100 20 C110 50 125 55 135 25 C145 55 165 60 175 30 C185 50 200 50 205 15 C215 45 230 55 240 40 L240 100 Z"/><path fill="${a}" d="M0 100 L0 75 C20 80 30 60 42 52 C48 70 62 72 72 55 C82 72 96 68 104 45 C112 65 126 68 136 48 C146 68 164 70 176 52 C186 66 200 62 208 42 C218 62 230 66 240 58 L240 100 Z"/></svg>` },
+  lightning: { label: 'Rayo', svg: (a, b) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 200"><polygon fill="${b}" points="58,0 10,110 46,110 30,200 92,80 56,80 76,0"/><polygon fill="${a}" points="56,8 20,104 52,104 40,176 80,86 48,86 66,8"/></svg>` },
+  arrow: { label: 'Flecha', svg: (a) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><polygon fill="${a}" points="0,30 120,30 120,0 200,50 120,100 120,70 0,70"/></svg>` },
+  chevrons: { label: 'Chevrones', svg: (a, b) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><polygon fill="${a}" points="0,0 40,0 90,50 40,100 0,100 50,50"/><polygon fill="${b}" points="55,0 95,0 145,50 95,100 55,100 105,50"/><polygon fill="${a}" points="110,0 150,0 200,50 150,100 110,100 160,50"/></svg>` },
+  checker: { label: 'Bandera a cuadros', svg: (a, b) => checkerSvg(a, b) },
+  stripes2: { label: 'Doble franja', svg: (a) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 200"><rect x="14" y="0" width="28" height="200" fill="${a}"/><rect x="58" y="0" width="28" height="200" fill="${a}"/></svg>` },
+  stripes3: { label: 'Franja con filetes', svg: (a, b) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 200"><rect x="8" y="0" width="6" height="200" fill="${b}"/><rect x="22" y="0" width="56" height="200" fill="${a}"/><rect x="86" y="0" width="6" height="200" fill="${b}"/></svg>` },
+  swoosh: { label: 'Swoosh', svg: (a) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100"><path fill="${a}" d="M0 80 C60 20 160 0 300 10 C180 20 100 45 40 95 Z"/></svg>` },
+  wave: { label: 'Onda', svg: (a, b) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100"><path fill="${a}" d="M0 50 C50 0 100 0 150 50 C200 100 250 100 300 50 L300 75 C250 125 200 125 150 75 C100 25 50 25 0 75 Z"/><path fill="${b}" d="M0 30 C50 -20 100 -20 150 30 C200 80 250 80 300 30 L300 45 C250 95 200 95 150 45 C100 -5 50 -5 0 45 Z"/></svg>` },
+  speed: { label: 'Líneas de velocidad', svg: (a) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100"><polygon fill="${a}" points="0,10 300,4 300,14"/><polygon fill="${a}" points="40,30 300,26 300,36"/><polygon fill="${a}" points="0,52 300,48 300,58"/><polygon fill="${a}" points="80,74 300,70 300,80"/><polygon fill="${a}" points="20,94 300,90 300,100"/></svg>` },
+  tribal: { label: 'Tribal', svg: (a) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 120"><path fill="${a}" d="M0 60 C40 20 80 20 120 55 C150 80 180 80 210 50 C240 20 270 20 300 40 C270 30 245 40 220 70 C185 105 145 105 110 70 C80 40 45 45 0 60 Z M150 10 C170 30 175 50 160 65 C185 55 190 30 150 10 Z M60 90 C90 110 130 110 160 95 C130 118 85 118 60 90 Z"/></svg>` },
+  diamond: { label: 'Rombo', svg: (a, b) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><polygon fill="${b}" points="50,0 100,50 50,100 0,50"/><polygon fill="${a}" points="50,14 86,50 50,86 14,50"/></svg>` },
+  shield: { label: 'Escudo', svg: (a, b) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120"><path fill="${b}" d="M50 0 L100 18 L94 70 C90 95 70 110 50 120 C30 110 10 95 6 70 L0 18 Z"/><path fill="${a}" d="M50 12 L88 26 L83 68 C80 88 65 100 50 108 C35 100 20 88 17 68 L12 26 Z"/></svg>` },
+  plate: { label: 'Placa de dorsal', svg: (a, b) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100"><rect x="2" y="2" width="116" height="96" rx="14" fill="${b}"/><rect x="8" y="8" width="104" height="84" rx="10" fill="${a}"/></svg>` },
+  circle: { label: 'Círculo de dorsal', svg: (a, b) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="49" fill="${b}"/><circle cx="50" cy="50" r="44" fill="${a}"/></svg>` },
+  stars: { label: 'Estrellas', svg: (a) => { const st = (cx, cy, r) => { let p = ''; for (let i = 0; i < 10; i++) { const rr = i % 2 ? r * 0.4 : r, an = Math.PI * i / 5 - Math.PI / 2; p += `${(cx + rr * Math.cos(an)).toFixed(1)},${(cy + rr * Math.sin(an)).toFixed(1)} `; } return `<polygon fill="${a}" points="${p}"/>`; }; return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100">${st(40, 50, 40)}${st(120, 50, 30)}${st(185, 50, 22)}${st(235, 50, 16)}${st(272, 50, 11)}</svg>`; } },
+  hazard: { label: 'Rayas de peligro', svg: (a, b) => { let r = `<rect width="300" height="60" fill="${b}"/>`; for (let x = -60; x < 300; x += 60) r += `<polygon fill="${a}" points="${x},60 ${x + 30},60 ${x + 90},0 ${x + 60},0"/>`; return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 60">${r}</svg>`; } },
+  sun: { label: 'Sol / rayos', svg: (a) => { let r = ''; for (let i = 0; i < 16; i++) { const an = Math.PI * 2 * i / 16, an2 = an + Math.PI / 16; r += `<polygon fill="${a}" points="50,50 ${(50 + 50 * Math.cos(an)).toFixed(1)},${(50 + 50 * Math.sin(an)).toFixed(1)} ${(50 + 50 * Math.cos(an2)).toFixed(1)},${(50 + 50 * Math.sin(an2)).toFixed(1)}"/>`; } return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${r}<circle cx="50" cy="50" r="18" fill="${a}"/></svg>`; } },
+  halftone: { label: 'Degradado de puntos', svg: (a) => { let r = ''; for (let i = 0; i < 12; i++) for (let j = 0; j < 4; j++) { const rad = 11 * (1 - i / 12); if (rad > 0.5) r += `<circle cx="${12 + i * 25}" cy="${12 + j * 25}" r="${rad.toFixed(1)}" fill="${a}"/>`; } return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100">${r}</svg>`; } },
+};
+let LIB = { tab: 'vinyls', patterns: [], images: [], skinDecals: [] };
+S.armed = null;
+
+function patUrl(name, c1, c2) { return `/api/pattern/${enc(name)}.png?c1=${enc(c1)}&c2=${enc(c2)}&size=512`; }
+function libImgUrl(name) { return `/api/library/${enc(name)}`; }
+function decalUrl(name) { return `/api/cars/${enc(S.car)}/skins/${enc(S.skin)}/decal/${enc(name)}`; }
+
+async function loadLibrary() {
+  try { LIB.patterns = await api('/api/patterns'); } catch (e) { LIB.patterns = []; }
+  $('#p-pattern').innerHTML = '<option value="">— color liso —</option>' + LIB.patterns.map((p) => `<option value="${p.name}">${esc(p.label)}</option>`).join('');
+  await refreshImages();
+  renderLibrary();
+}
+async function refreshImages() {
+  try { LIB.images = await api('/api/library'); } catch (e) { LIB.images = []; }
+  try { LIB.skinDecals = S.car && S.skin ? await api(`/api/cars/${enc(S.car)}/skins/${enc(S.skin)}/decals`) : []; } catch (e) { LIB.skinDecals = []; }
+}
+function renderLibrary() {
+  const c1 = libC1(), c2 = libC2(); let html = '';
+  if (LIB.tab === 'vinyls') html = Object.entries(VINYLS).map(([k, v]) => `<div class="item" data-type="vinyl" data-n="${k}" title="${esc(v.label)}">${v.svg(c1, c2)}</div>`).join('');
+  else if (LIB.tab === 'patterns') html = LIB.patterns.map((p) => `<div class="item" data-type="pattern" data-n="${p.name}" title="${esc(p.label)}" style="background-image:url('${patUrl(p.name, c1, c2)}');background-size:cover"></div>`).join('');
+  else html = `<div class="item" data-type="upload" title="Subir imágenes (PNG con transparencia, JPG, SVG)" style="font-size:22px;display:flex;align-items:center;justify-content:center">＋</div>` +
+    LIB.images.map((n) => `<div class="item" data-type="image" data-n="${esc(n)}" title="${esc(n)}" style="background-image:url('${libImgUrl(n)}')"><button class="del" title="Borrar de la biblioteca">×</button></div>`).join('') +
+    LIB.skinDecals.map((n) => `<div class="item" data-type="decal" data-n="${esc(n)}" title="${esc(n)} (de esta skin)" style="background-image:url('${decalUrl(n)}')"></div>`).join('');
+  $('#lib-list').innerHTML = html || '<span class="hint">vacío</span>';
+  for (const el of $$('#lib-list .item')) {
+    el.onclick = () => libClick(el.dataset.type, el.dataset.n, el);
+    const del = el.querySelector('.del');
+    if (del) del.onclick = async (e) => { e.stopPropagation(); if (!confirm(`¿Borrar ${el.dataset.n} de la biblioteca?`)) return; await api(libImgUrl(el.dataset.n), { method: 'DELETE' }); await refreshImages(); renderLibrary(); };
+  }
+  for (const b of $$('[data-lib]')) b.classList.toggle('active', b.dataset.lib === LIB.tab);
+}
+for (const b of $$('[data-lib]')) b.onclick = () => { LIB.tab = b.dataset.lib; renderLibrary(); };
+$('#lib-c1').oninput = renderLibrary; $('#lib-c2').oninput = renderLibrary;
+
+function libClick(type, name, el) {
+  if (!S.canvas) return;
+  if (type === 'upload') return $('#file-decal').click();
+  const sel = S.canvas.getActiveObject();
+  if (type === 'pattern' && sel && sel.type !== 'i-text' && sel.kind !== 'image') { applyPattern(sel, name, +$('#p-patscale').value || 1); showProps(); return; }
+  if ($('#chk-place3d').checked) {
+    S.armed = { type, name }; for (const x of $$('#lib-list .item')) x.classList.toggle('armed', x === el);
+    $('#viewer').classList.add('armed'); status('Haz clic sobre el coche en 3D para colocar ' + name); return;
+  }
+  addFromLibrary(type, name);
+}
+function disarm() { S.armed = null; $('#viewer').classList.remove('armed'); for (const x of $$('#lib-list .item')) x.classList.remove('armed'); }
+
+/** Añade un elemento de la biblioteca al lienzo centrado en (x, y) (por defecto el centro). */
+function addFromLibrary(type, name, x = S.W / 2, y = S.H / 2, cb) {
+  const c1 = libC1(), c2 = libC2();
+  if (type === 'vinyl') {
+    fabric.loadSVGFromString(VINYLS[name].svg(c1, c2), (objs, opts) => {
+      const g = fabric.util.groupSVGElements(objs, opts);
+      const s = (S.W / 4) / g.width; g.set({ originX: 'center', originY: 'center', left: x, top: y, scaleX: s, scaleY: s });
+      add(g, VINYLS[name].label, 'vinyl'); cb && cb(g);
+    });
+  } else if (type === 'pattern') {
+    const r = new fabric.Rect({ left: 0, top: 0, originX: 'left', originY: 'top', width: S.W, height: S.H, fill: c1 });
+    add(r, 'Textura ' + name, 'shape'); applyPattern(r, name, 1); cb && cb(r);
+  } else {
+    const url = type === 'decal' ? decalUrl(name) : libImgUrl(name);
+    fabric.Image.fromURL(url, (img) => {
+      if (!img || !img.width) return toast('No se pudo cargar ' + name, true);
+      const s = Math.min(1, (S.W / 4) / img.width); img.set({ originX: 'center', originY: 'center', left: x, top: y, scaleX: s, scaleY: s });
+      add(img, name, 'image'); cb && cb(img);
+    }, { crossOrigin: 'anonymous' });
+  }
+}
+function fillTargets(o) { return o.type === 'group' ? o.getObjects().flatMap(fillTargets) : o.type === 'activeSelection' ? o.getObjects().flatMap(fillTargets) : [o]; }
+function applyPattern(obj, name, scale) {
+  if (!name) { for (const t of fillTargets(obj)) t.set('fill', libC1()); obj.pat = null; S.canvas.requestRenderAll(); pushHistory(); scheduleLive(); return; }
+  new fabric.Pattern({ source: patUrl(name, libC1(), libC2()), repeat: 'repeat', patternTransform: [scale, 0, 0, scale, 0, 0] }, (pat) => {
+    for (const t of fillTargets(obj)) t.set('fill', pat);
+    obj.pat = name; obj.patScale = scale; obj.grad = null; obj.dirty = true;
+    S.canvas.requestRenderAll(); pushHistory(); scheduleLive(); S.dirty = true;
+  });
+}
+function applyGradient(obj, mode, c2) {
+  const c1 = typeof obj.fill === 'string' && obj.fill ? obj.fill : libC1();
+  let g;
+  if (!mode) { for (const t of fillTargets(obj)) t.set('fill', c1); obj.grad = null; }
+  else {
+    const stops = [{ offset: 0, color: c1 }, { offset: 1, color: c2 }];
+    if (mode === 'radial') g = new fabric.Gradient({ type: 'radial', gradientUnits: 'percentage', coords: { x1: 0.5, y1: 0.5, r1: 0, x2: 0.5, y2: 0.5, r2: 0.7 }, colorStops: stops });
+    else { const a = +mode * Math.PI / 180; g = new fabric.Gradient({ type: 'linear', gradientUnits: 'percentage', coords: { x1: 0, y1: 0, x2: Math.cos(a), y2: Math.sin(a) }, colorStops: stops }); }
+    for (const t of fillTargets(obj)) t.set('fill', g);
+    obj.grad = mode; obj.grad2 = c2; obj.pat = null;
+  }
+  obj.dirty = true; S.canvas.requestRenderAll(); pushHistory(); scheduleLive(); S.dirty = true;
+}
+
+// subida de imágenes (botón, arrastrar/soltar, pegar)
+$('#file-decal').onchange = async (e) => { await uploadImages([...e.target.files]); e.target.value = ''; };
+async function uploadImages(files, x, y) {
+  const added = [];
+  for (const f of files) {
+    if (!/^image\//.test(f.type) && !/\.svg$/i.test(f.name)) continue;
     try {
-      const r = await api(`/api/cars/${enc(S.car)}/skins/${enc(S.skin)}/decals?name=${enc(f.name)}`, { method: 'POST', body: await f.arrayBuffer() });
-      addDecal(r.name);
+      const r = await api(`/api/library?name=${enc(f.name || 'pegada.png')}`, { method: 'POST', body: await f.arrayBuffer() });
+      added.push(r.name);
     } catch (err) { toast(err.message, true); }
   }
-  e.target.value = ''; loadDecals();
-};
-function decalUrl(name) { return `/api/cars/${enc(S.car)}/skins/${enc(S.skin)}/decal/${enc(name)}`; }
-function addDecal(name) {
-  fabric.Image.fromURL(decalUrl(name), (img) => {
-    const s = Math.min(1, (S.W / 4) / img.width); img.set({ ...DEF(), fill: undefined, scaleX: s, scaleY: s });
-    add(img, name, 'image');
-  }, { crossOrigin: 'anonymous' });
+  await refreshImages(); LIB.tab = 'images'; renderLibrary();
+  added.forEach((n, i) => addFromLibrary('image', n, (x ?? S.W / 2) + i * 40, (y ?? S.H / 2) + i * 40));
+  return added;
 }
-async function loadDecals() {
-  try {
-    const list = await api(`/api/cars/${enc(S.car)}/skins/${enc(S.skin)}/decals`);
-    $('#decal-list').innerHTML = list.map((n) => `<img src="${decalUrl(n)}" title="${esc(n)}" data-n="${esc(n)}">`).join('') || '<span class="hint">Sube PNG con "Imagen…" (logos, vinilos)</span>';
-    for (const im of $$('#decal-list img')) im.onclick = () => addDecal(im.dataset.n);
-  } catch (e) { /* */ }
+function setupDrops() {
+  const wrap = $('#canvas-wrap'), viewer = $('#viewer');
+  for (const el of [wrap, viewer]) {
+    el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('dragover'); });
+    el.addEventListener('dragleave', () => el.classList.remove('dragover'));
+    el.addEventListener('drop', async (e) => {
+      e.preventDefault(); el.classList.remove('dragover'); if (!S.canvas) return;
+      const files = [...e.dataTransfer.files]; if (!files.length) return;
+      let x, y;
+      if (el === wrap) { const p = S.canvas.getPointer(e); x = p.x; y = p.y; }
+      else { const uv = pickUV(e); if (uv) { x = uv.x; y = uv.y; } }
+      uploadImages(files, x, y);
+    });
+  }
+  document.addEventListener('paste', (e) => {
+    if (!S.canvas || $('#view-editor').hidden) return;
+    const files = [...(e.clipboardData?.files || [])].filter((f) => /^image\//.test(f.type));
+    if (files.length) { e.preventDefault(); uploadImages(files.map((f, i) => new File([f], f.name || `pegada_${Date.now()}_${i}.png`, { type: f.type }))); }
+  });
 }
+setupDrops();
+
+// ------------------------------------------------------------------ interacción con el coche 3D
+const RAY = new THREE.Raycaster();
+function pickUV(e) {
+  if (!V.model || !S.W) return null;
+  const cv = $('#v3d'); const r = cv.getBoundingClientRect();
+  RAY.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), V.camera);
+  const meshes = []; V.model.traverse((m) => { if (m.isMesh && m.material.userData?.live) meshes.push(m); });
+  const hit = RAY.intersectObjects(meshes, false).find((h) => h.uv);
+  if (!hit) return null;
+  return { x: hit.uv.x * S.W, y: hit.uv.y * S.H, hit };
+}
+function objectAt(x, y) {
+  const pt = new fabric.Point(x, y);
+  return S.canvas.getObjects().slice().reverse().find((o) => o.visible && !o.locked && o.containsPoint(pt, null, true));
+}
+function setup3DClicks() {
+  const cv = $('#v3d'); let down = null;
+  cv.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+  cv.addEventListener('pointerup', (e) => {
+    if (!down) return; const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4; down = null;
+    if (moved || e.button !== 0 || !S.canvas) return;
+    const uv = pickUV(e);
+    if (!uv) { status('Ese punto no usa la textura en edición'); return; }
+    if (S.armed) { const a = S.armed; addFromLibrary(a.type, a.name, uv.x, uv.y); if (!e.ctrlKey) disarm(); status(`Colocado en (${Math.round(uv.x)}, ${Math.round(uv.y)})`); return; }
+    const act = S.canvas.getActiveObject();
+    if (e.shiftKey && act) { act.set({ left: uv.x, top: uv.y }); act.setCoords(); S.canvas.requestRenderAll(); pushHistory(); scheduleLive(); showProps(); return; }
+    const o = objectAt(uv.x, uv.y);
+    if (o) { S.canvas.setActiveObject(o); S.canvas.requestRenderAll(); status(`Capa: ${o.name || o.type}`); }
+    else { S.canvas.discardActiveObject(); S.canvas.requestRenderAll(); status(`UV (${Math.round(uv.x)}, ${Math.round(uv.y)}) sin capa`); }
+  });
+}
+setup3DClicks();
 
 // ------------------------------------------------------------------ capas
 const ICON = { base: '🎨', shape: '◆', text: 'T', image: '🖼', brush: '✏' };
@@ -405,7 +571,8 @@ function showProps() {
   if (!o) return;
   const single = o.type !== 'activeSelection';
   $('#p-name').value = o.name || '';
-  const fill = typeof o.fill === 'string' && o.fill ? o.fill : '';
+  const f0 = fillTargets(o)[0] || o; const fill = typeof f0.fill === 'string' && f0.fill ? f0.fill : '';
+  $('#p-pattern').value = o.pat || ''; $('#p-patscale').value = o.patScale || 1; $('#p-grad').value = o.grad || ''; if (o.grad2) $('#p-grad2').value = o.grad2;
   $('#p-nofill').checked = !fill; $('#p-fill').value = toHex(fill || '#ffffff');
   $('#p-stroke').value = toHex(o.stroke || '#000000'); $('#p-strokew').value = o.strokeWidth || 0;
   $('#p-opacity').value = o.opacity ?? 1; $('#p-blend').value = o.globalCompositeOperation || 'source-over';
@@ -428,14 +595,20 @@ function setProp(fn) {
   const o = propsObj; if (!o) return;
   const targets = o.type === 'activeSelection' ? o.getObjects() : [o];
   for (const t of targets) fn(t);
+  if (fn.deep) for (const t of targets) for (const ch of fillTargets(t)) if (ch !== t) fn(ch);
   o.setCoords(); S.canvas.requestRenderAll(); pushHistory(); scheduleLive(); S.dirty = true;
 }
 const P = (id) => $('#' + id);
 P('p-name').onchange = (e) => setProp((t) => (t.name = e.target.value)) || renderLayers();
-P('p-fill').oninput = (e) => { P('p-nofill').checked = false; setProp((t) => t.set('fill', e.target.value)); };
-P('p-nofill').onchange = (e) => setProp((t) => t.set('fill', e.target.checked ? '' : P('p-fill').value));
-P('p-stroke').oninput = (e) => setProp((t) => t.set('stroke', e.target.value));
-P('p-strokew').oninput = (e) => setProp((t) => t.set({ stroke: t.stroke || P('p-stroke').value, strokeWidth: +e.target.value }));
+const deep = (fn) => { fn.deep = true; return fn; };
+P('p-fill').oninput = (e) => { P('p-nofill').checked = false; setProp(deep((t) => { t.set('fill', e.target.value); t.pat = null; t.grad = null; t.dirty = true; })); P('p-pattern').value = ''; P('p-grad').value = ''; };
+P('p-nofill').onchange = (e) => setProp(deep((t) => { t.set('fill', e.target.checked ? '' : P('p-fill').value); t.dirty = true; }));
+P('p-pattern').onchange = (e) => { if (propsObj) applyPattern(propsObj, e.target.value, +P('p-patscale').value || 1); };
+P('p-patscale').onchange = (e) => { if (propsObj && propsObj.pat) applyPattern(propsObj, propsObj.pat, +e.target.value || 1); };
+P('p-grad').onchange = (e) => { if (propsObj) applyGradient(propsObj, e.target.value, P('p-grad2').value); };
+P('p-grad2').oninput = (e) => { if (propsObj && propsObj.grad) applyGradient(propsObj, propsObj.grad, e.target.value); };
+P('p-stroke').oninput = (e) => setProp(deep((t) => t.set('stroke', e.target.value)));
+P('p-strokew').oninput = (e) => setProp(deep((t) => t.set({ stroke: t.stroke || P('p-stroke').value, strokeWidth: +e.target.value })));
 P('p-opacity').oninput = (e) => setProp((t) => t.set('opacity', +e.target.value));
 P('p-blend').onchange = (e) => setProp((t) => t.set('globalCompositeOperation', e.target.value));
 P('p-left').onchange = (e) => { if (propsObj) { propsObj.set('left', +e.target.value); propsObj.setCoords(); S.canvas.requestRenderAll(); pushHistory(); } };
@@ -490,7 +663,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.ctrlKey && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); restoreHistory(S.hpos + 1); }
   else if (e.ctrlKey && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicate(); }
   else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSel(); }
-  else if (e.key === 'Escape') { if (S.canvas.isDrawingMode) toggleBrush(false); S.canvas.discardActiveObject(); S.canvas.requestRenderAll(); }
+  else if (e.key === 'Escape') { disarm(); if (S.canvas.isDrawingMode) toggleBrush(false); S.canvas.discardActiveObject(); S.canvas.requestRenderAll(); }
   else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
     const o = S.canvas.getActiveObject(); if (!o) return; e.preventDefault();
     const d = e.shiftKey ? 10 : 1; o.set({ left: o.left + (e.key === 'ArrowRight' ? d : e.key === 'ArrowLeft' ? -d : 0), top: o.top + (e.key === 'ArrowDown' ? d : e.key === 'ArrowUp' ? -d : 0) });
