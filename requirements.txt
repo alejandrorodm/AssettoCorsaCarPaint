@@ -1,0 +1,4 @@
+numpy>=1.24
+Pillow>=10.4
+fastapi>=0.100
+uvicorn>=0.20

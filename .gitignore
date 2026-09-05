@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+settings.json
+cache/
+tests/fake_ac/
+nohup.out
+Captura de pantalla *.png

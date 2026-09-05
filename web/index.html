@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>AC Car Paint — editor de skins</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/web/style.css?v=1">
+<script src="/web/vendor/fabric.min.js"></script>
+<script type="importmap">
+{"imports": {"three": "/web/vendor/three/build/three.module.js", "three/addons/": "/web/vendor/three/examples/jsm/"}}
+</script>
+</head>
+<body>
+<header>
+  <div class="brand">🎨 AC Car Paint <span class="hint" id="version">v0.1</span></div>
+  <nav id="crumbs"><a href="#cars">Garaje</a></nav>
+  <div class="spacer"></div>
+  <button id="btn-settings" class="ghost" title="Carpeta de Assetto Corsa">⚙ Ajustes</button>
+</header>
+
+<!-- ---------------------------------------------------------------- garaje -->
+<section id="view-cars" class="view">
+  <div class="toolbar">
+    <input id="car-search" placeholder="Buscar coche o marca…" autofocus>
+    <span class="hint" id="car-count"></span>
+  </div>
+  <div id="settings-banner" class="banner" hidden>
+    No encuentro la carpeta de Assetto Corsa. <button id="btn-settings2">Configurar</button>
+  </div>
+  <div id="car-grid" class="grid"></div>
+</section>
+
+<!-- ---------------------------------------------------------------- skins de un coche -->
+<section id="view-skins" class="view" hidden>
+  <div class="toolbar">
+    <img id="skins-badge" class="badge" alt="">
+    <h1 id="skins-title"></h1>
+    <div class="spacer"></div>
+    <button id="btn-new-skin" class="primary">＋ Nueva skin</button>
+    <button id="btn-import-skin">⇪ Importar zip</button>
+    <input type="file" id="file-import" accept=".zip" hidden>
+  </div>
+  <div id="skin-grid" class="grid"></div>
+</section>
+
+<!-- ---------------------------------------------------------------- editor -->
+<section id="view-editor" class="view editor" hidden>
+  <div class="toolbar editor-bar">
+    <span id="ed-title" class="title"></span>
+    <label>Textura <select id="ed-texture"></select></label>
+    <label title="Qué se carga como fondo del lienzo">Base
+      <select id="ed-base">
+        <option value="orig">original de la skin</option>
+        <option value="kn5">la del coche (kn5)</option>
+        <option value="none">ninguna (transparente)</option>
+      </select>
+    </label>
+    <button id="btn-undo" title="Deshacer (Ctrl+Z)">↶</button>
+    <button id="btn-redo" title="Rehacer (Ctrl+Y)">↷</button>
+    <button id="btn-fit" title="Ajustar zoom">⤢</button>
+    <label class="chk"><input type="checkbox" id="chk-uv"> UV</label>
+    <div class="spacer"></div>
+    <span id="ed-status" class="hint"></span>
+    <button id="btn-preview" title="Genera preview.jpg y livery.png con la vista 3D">📷 Preview</button>
+    <button id="btn-save" class="primary" title="Escribe el DDS en la skin y guarda el proyecto (Ctrl+S)">💾 Guardar</button>
+  </div>
+
+  <div class="editor-body">
+    <aside class="panel left">
+      <h3>Añadir</h3>
+      <div class="tools">
+        <button data-add="base" title="Rectángulo de color que cubre toda la textura">🎨 Color base</button>
+        <button data-add="rect">▭ Rectángulo</button>
+        <button data-add="circle">● Círculo</button>
+        <button data-add="ring">◯ Anillo</button>
+        <button data-add="triangle">▲ Triángulo</button>
+        <button data-add="stripe">▬ Franja</button>
+        <button data-add="star">★ Estrella</button>
+        <button data-add="chevron">⌃ Chevrón</button>
+        <button data-add="text">T Texto</button>
+        <button data-add="number">🔢 Dorsal</button>
+        <button data-add="image">🖼 Imagen…</button>
+        <button data-add="brush" id="btn-brush">✏ Pincel</button>
+      </div>
+      <input type="file" id="file-decal" accept="image/*" multiple hidden>
+      <div id="brush-opts" class="sub" hidden>
+        <label>Grosor <input type="range" id="brush-size" min="1" max="200" value="20"></label>
+        <label>Color <input type="color" id="brush-color" value="#ffffff"></label>
+      </div>
+      <div id="decal-lib" class="sub">
+        <h4>Calcomanías de esta skin</h4>
+        <div id="decal-list" class="decals"></div>
+      </div>
+      <h3>Capas <span class="hint">(arriba = delante)</span></h3>
+      <div id="layers" class="layers"></div>
+    </aside>
+
+    <div class="canvas-wrap" id="canvas-wrap">
+      <canvas id="c"></canvas>
+      <div class="canvas-hint">rueda: zoom · botón central / Alt+arrastrar: mover · Supr: borrar · Ctrl+D: duplicar</div>
+    </div>
+
+    <aside class="panel right">
+      <div id="viewer" class="viewer">
+        <canvas id="v3d"></canvas>
+        <div class="viewer-bar">
+          <button id="btn-rot" title="Giro automático">🔄</button>
+          <button id="btn-cam-front" title="Vista frontal">F</button>
+          <button id="btn-cam-side" title="Vista lateral">L</button>
+          <button id="btn-cam-top" title="Vista superior">T</button>
+          <button id="btn-cam-rear" title="Vista trasera">R</button>
+          <span id="v3d-status" class="hint"></span>
+        </div>
+      </div>
+      <div id="props" class="props">
+        <h3>Propiedades</h3>
+        <div id="props-none" class="hint">Selecciona una capa del lienzo.</div>
+        <div id="props-body" hidden>
+          <label>Nombre <input id="p-name"></label>
+          <div class="row">
+            <label>Relleno <input type="color" id="p-fill"></label>
+            <label class="chk"><input type="checkbox" id="p-nofill"> sin relleno</label>
+          </div>
+          <div class="row">
+            <label>Borde <input type="color" id="p-stroke"></label>
+            <label>Grosor <input type="number" id="p-strokew" min="0" max="500" step="1"></label>
+          </div>
+          <label>Opacidad <input type="range" id="p-opacity" min="0" max="1" step="0.01"></label>
+          <label>Mezcla
+            <select id="p-blend">
+              <option value="source-over">normal</option>
+              <option value="multiply">multiplicar</option>
+              <option value="screen">pantalla</option>
+              <option value="overlay">superponer</option>
+              <option value="soft-light">luz suave</option>
+              <option value="hard-light">luz fuerte</option>
+              <option value="darken">oscurecer</option>
+              <option value="lighten">aclarar</option>
+              <option value="difference">diferencia</option>
+              <option value="hue">tono</option>
+              <option value="saturation">saturación</option>
+              <option value="color">color</option>
+              <option value="luminosity">luminosidad</option>
+            </select>
+          </label>
+          <div class="row">
+            <label>X <input type="number" id="p-left" step="1"></label>
+            <label>Y <input type="number" id="p-top" step="1"></label>
+          </div>
+          <div class="row">
+            <label>Ancho <input type="number" id="p-width" step="1" min="1"></label>
+            <label>Alto <input type="number" id="p-height" step="1" min="1"></label>
+          </div>
+          <div class="row">
+            <label>Ángulo <input type="number" id="p-angle" step="1"></label>
+            <label class="chk"><input type="checkbox" id="p-lockratio" checked> proporción</label>
+          </div>
+          <div id="props-text" hidden>
+            <label>Texto <textarea id="p-text" rows="2"></textarea></label>
+            <label>Fuente
+              <select id="p-font">
+                <option>Impact</option><option>Arial Black</option><option>Arial</option><option>Verdana</option>
+                <option>Tahoma</option><option>Segoe UI</option><option>Trebuchet MS</option><option>Georgia</option>
+                <option>Times New Roman</option><option>Courier New</option><option>Consolas</option><option>Comic Sans MS</option>
+              </select>
+            </label>
+            <div class="row">
+              <label class="chk"><input type="checkbox" id="p-bold"> negrita</label>
+              <label class="chk"><input type="checkbox" id="p-italic"> cursiva</label>
+              <label>Espaciado <input type="number" id="p-spacing" step="10"></label>
+            </div>
+          </div>
+          <div class="btnrow">
+            <button id="p-flipx" title="Voltear horizontal">⇋ H</button>
+            <button id="p-flipy" title="Voltear vertical">⇅ V</button>
+            <button id="p-mirror" title="Duplicar en espejo horizontal (lado contrario de la textura)">🪞 Espejo</button>
+            <button id="p-dup" title="Duplicar (Ctrl+D)">⧉</button>
+          </div>
+          <div class="btnrow">
+            <button id="p-up" title="Traer al frente">▲</button>
+            <button id="p-down" title="Enviar atrás">▼</button>
+            <button id="p-lock" title="Bloquear/desbloquear">🔒</button>
+            <button id="p-del" class="danger" title="Borrar (Supr)">🗑</button>
+          </div>
+        </div>
+        <h3>Exportar</h3>
+        <label>Formato DDS
+          <select id="ed-fmt"><option value="">como el original</option><option value="DXT5">DXT5 (con alpha)</option><option value="DXT1">DXT1 (sin alpha, más pequeño)</option></select>
+        </label>
+        <label class="chk" title="El alpha de la textura de carrocería suele controlar el brillo/reflejo; se conserva el del original"><input type="checkbox" id="ed-keepalpha" checked> conservar alpha original</label>
+        <div class="btnrow">
+          <button id="btn-restore" title="Recupera el DDS original de la skin guardado antes de la primera edición">↺ Restaurar original</button>
+          <button id="btn-export-png" title="Descarga la textura pintada como PNG">⇩ PNG</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ---------------------------------------------------------------- diálogos -->
+<dialog id="dlg-settings">
+  <form method="dialog">
+    <h2>Carpeta de Assetto Corsa</h2>
+    <p class="hint">La carpeta que contiene <code>content/cars</code>. Ej.: <code>C:\Program Files (x86)\Steam\steamapps\common\assettocorsa</code></p>
+    <input id="set-root" placeholder="C:\…\assettocorsa" size="60">
+    <p id="set-err" class="error"></p>
+    <menu><button value="cancel" class="ghost">Cancelar</button><button id="set-ok" value="ok" class="primary">Guardar</button></menu>
+  </form>
+</dialog>
+
+<dialog id="dlg-skin">
+  <form method="dialog">
+    <h2 id="dlg-skin-title">Nueva skin</h2>
+    <label>Carpeta (id) <input id="sk-id" placeholder="mi_skin" required pattern="[A-Za-z0-9 _.\-()]+"></label>
+    <label id="sk-clone-row">Copiar texturas de <select id="sk-clone"></select></label>
+    <label>Nombre visible <input id="sk-name"></label>
+    <div class="row"><label>Piloto <input id="sk-driver"></label><label>Dorsal <input id="sk-number" size="4"></label></div>
+    <div class="row"><label>Equipo <input id="sk-team"></label><label>País <input id="sk-country"></label></div>
+    <label>Prioridad <input id="sk-priority" type="number" value="1" min="0"></label>
+    <p id="sk-err" class="error"></p>
+    <menu><button value="cancel" class="ghost">Cancelar</button><button id="sk-ok" value="ok" class="primary">Guardar</button></menu>
+  </form>
+</dialog>
+
+<div id="toast" hidden></div>
+<script type="module" src="/web/app.js?v=1"></script>
+</body>
+</html>
