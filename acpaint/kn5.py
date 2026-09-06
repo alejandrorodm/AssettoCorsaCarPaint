@@ -18,7 +18,9 @@ class Kn5:
         self.materials = []    # [{name, shader, blend, alpha_tested, depth_mode, props, textures}]
         self.meshes = []       # [{name, path, verts (N,11) float32 mundo, idx (M,) uint32, material, active, renderable, transparent, lod_in, lod_out}]
         self.bad_normals = 0.0 # fracción de normales que no son unitarias (≈0 en un kn5 sano; alto si el mod está cifrado)
+        self.garbled = 0.0     # fracción de triángulos en mallas cuya geometría parece barajada/cifrada (0 = sana)
         self._norm_stats = [0, 0]
+        self._garble_stats = [0, 0]
 
 
 def read(path):
@@ -78,6 +80,14 @@ def read(path):
             if nv:
                 ln = np.linalg.norm(v[:2000, 3:6], axis=1)
                 k._norm_stats[0] += int(((ln < 0.9) | (ln > 1.1)).sum()); k._norm_stats[1] += len(ln)
+            if len(idx) >= 600:
+                # mods cifrados: los vértices están barajados, así que las aristas son casi tan largas como
+                # la propia malla (en una malla sana la arista media es una pequeña fracción de la diagonal)
+                tri = idx[:6000].reshape(-1, 3); pts = raw[:, :3]
+                e = np.linalg.norm(pts[tri[:, 0]] - pts[tri[:, 1]], axis=1)
+                diag = float(np.linalg.norm(pts.max(0) - pts.min(0)))
+                bad = diag > 1e-6 and float(np.median(e)) / diag > 0.12
+                k._garble_stats[0] += len(idx) // 3 if bad else 0; k._garble_stats[1] += len(idx) // 3
             p = np.c_[v[:, :3], np.ones(nv)] @ world
             v[:, :3] = p[:, :3]
             n = v[:, 3:6] @ world[:3, :3]
@@ -93,6 +103,7 @@ def read(path):
 
     node(np.eye(4), [], True)
     k.bad_normals = k._norm_stats[0] / max(1, k._norm_stats[1])
+    k.garbled = k._garble_stats[0] / max(1, k._garble_stats[1])
     return k
 
 
@@ -143,7 +154,7 @@ def uv_info(k, texture, grid=512):
     mats = {i for i, m in enumerate(k.materials) if m["textures"].get("txDiffuse") == texture}
     img = Image.new("L", (grid, grid), 0); d = ImageDraw.Draw(img)
     n_mesh = n_tri = pos = neg = tiled = 0
-    area = 0.0
+    area = 0.0; area_world = 0.0
     lo = np.array([np.inf, np.inf]); hi = -lo
     for m in k.meshes:
         if m["material"] not in mats or not m["renderable"] or len(m["idx"]) < 3:
@@ -153,6 +164,8 @@ def uv_info(k, texture, grid=512):
         a, b, c = uv[tri[:, 0]], uv[tri[:, 1]], uv[tri[:, 2]]
         s = ((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1]) - (c[:, 0] - a[:, 0]) * (b[:, 1] - a[:, 1])) / 2
         area += float(np.abs(s).sum()); pos += int((s > 1e-9).sum()); neg += int((s < -1e-9).sum()); n_tri += len(s)
+        P = m["verts"][:, :3].astype(np.float64)
+        area_world += float(np.linalg.norm(np.cross(P[tri[:, 1]] - P[tri[:, 0]], P[tri[:, 2]] - P[tri[:, 0]]), axis=1).sum() / 2)
         lo = np.minimum(lo, uv.min(0)); hi = np.maximum(hi, uv.max(0))
         tiled += int(((uv < -0.001) | (uv > 1.001)).any(1).sum())
         # los triángulos que salen de [0,1] se repiten (tiling): se pintan en módulo 1
@@ -164,7 +177,11 @@ def uv_info(k, texture, grid=512):
     layers = (area / cov) if cov > 0 else 0.0
     mirrored = min(pos, neg) / max(1, pos + neg)
     degenerate = n_tri > 0 and (cov < 0.002 or area < 1e-5)
+    # densidad media de texels: unidades UV por metro (el cliente multiplica por el ancho del lienzo)
+    uv_per_m = (area / area_world) ** 0.5 if area_world > 1e-9 and area > 0 else None
+    suspect = bool(k.garbled > 0.3 or k.bad_normals > 0.2)
     return {"texture": texture, "meshes": n_mesh, "triangles": n_tri, "coverage": round(cov, 4), "layers": round(layers, 2),
+            "uv_per_m": None if (uv_per_m is None or suspect) else round(uv_per_m, 5), "garbled": round(k.garbled, 3),
             "mirrored": round(mirrored, 3), "tiled": round(tiled / max(1, sum(len(m["verts"]) for m in k.meshes if m["material"] in mats)), 3),
             "bbox": [None if not np.isfinite(x) else round(float(x), 4) for x in (*lo, *hi)],
-            "degenerate": bool(degenerate), "encrypted_suspect": bool(k.bad_normals > 0.2), "bad_normals": round(k.bad_normals, 3)}
+            "degenerate": bool(degenerate), "encrypted_suspect": suspect, "bad_normals": round(k.bad_normals, 3)}

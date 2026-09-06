@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
@@ -99,9 +100,10 @@ def _cached_file(key, ext, build):
     path = os.path.join(CACHE, key + ext)
     if not os.path.isfile(path):
         data = build()
-        with open(path + ".tmp", "wb") as f:
+        tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"   # nombre único: peticiones concurrentes de la misma clave
+        with open(tmp, "wb") as f:
             f.write(data)
-        os.replace(path + ".tmp", path)
+        os.replace(tmp, path)
     return path
 
 
@@ -130,7 +132,7 @@ def api_uv(car: str, name: str, size: int = 2048):
 def api_uvinfo(car: str, name: str):
     p = err(cars.main_kn5, car)
     sig = f"{os.path.getsize(p)}_{int(os.path.getmtime(p))}"
-    key = "uvinfo_" + hashlib.md5(f"{car}|{name}|{sig}|2".encode()).hexdigest()
+    key = "uvinfo_" + hashlib.md5(f"{car}|{name}|{sig}|3".encode()).hexdigest()
     path = _cached_file(key, ".json", lambda: json.dumps(err(cars.texture_uv_info, car, name)).encode())
     return FileResponse(path, media_type="application/json")
 

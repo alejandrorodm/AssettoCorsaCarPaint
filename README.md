@@ -103,24 +103,41 @@ propiedades.
 
 Muchos coches (Kunos y mods) no llevan una textura de carrocería pintada: la skin es un `car_paint.dds` o
 `Skin_00.dds` de **1×1 o 4×4 píxeles** con el color, y el resto (sombras, brillos) lo aportan otras texturas.
-El editor los detecta y hace lo siguiente:
+Al abrir una de estas texturas el editor **pregunta** qué quieres hacer:
 
-- **Cambiar el color** funciona siempre: pon una capa *Color base* con el color que quieras y guarda.
-- Para **vinilos en todo el coche** el lienzo se **amplía automáticamente a 2048×2048** (o el tamaño que elijas
-  en *Lienzo*) y el DDS se escribe a ese tamaño. Assetto Corsa acepta cualquier tamaño potencia de 2, así que
-  la skin sigue siendo una skin normal, sin tocar el kn5.
-- Que los vinilos se vean bien depende de que las mallas de la carrocería tengan un **desplegado UV real**.
-  Junto al selector de textura aparece un diagnóstico:
-  - **UV ✓**: desplegado normal, se puede pintar cualquier cosa.
-  - **UV ⚠ simétricas**: los dos lados del coche comparten la misma zona de la textura (muy habitual). Un
-    vinilo aparece en ambos lados y en uno se ve invertido; usa formas simétricas, o dorsales/logos en el
-    capó, techo y trasera.
-  - **UV ⚠ solapadas**: varias piezas comparten zona; un vinilo puede repetirse en varias.
-  - **UV ✗ sin desplegado**: todas las mallas apuntan al mismo punto de la textura. Sólo se puede cambiar el
-    color; para vinilos habría que re-desplegar el modelo (editar el kn5), que ya no es una skin.
-  - **⚠ kn5 posiblemente cifrado**: los mods "protegidos" llevan la geometría cifrada y sólo se ven bien
-    dentro de AC con CSP. En el editor el 3D sale como una maraña de triángulos y no sirve para colocar sobre
-    el coche; sí puedes pintar la textura en 2D (y cambiar el color).
+- **Mantener tamaño (sólo color)**: lo seguro y lo que el coche espera. Pon una capa *Color base* con el
+  color que quieras y guarda; el DDS sigue siendo de 4×4.
+- **Ampliar a 2048 / 4096 (vinilos)**: el lienzo y el DDS pasan a ese tamaño (AC acepta cualquier tamaño
+  potencia de 2, sigue siendo una skin normal). Sólo tiene sentido si las mallas de la carrocería tienen un
+  **desplegado UV real**; el propio diálogo avisa cuando no es así. El selector *Lienzo* permite cambiarlo después.
+
+Junto al selector de textura aparece un diagnóstico de las UV:
+
+- **UV ✓**: desplegado normal, se puede pintar cualquier cosa.
+- **UV ⚠ simétricas**: los dos lados del coche comparten la misma zona de la textura (muy habitual). Un
+  vinilo aparece en ambos lados y en uno se ve invertido; usa formas simétricas, o dorsales/logos en el
+  capó, techo y trasera.
+- **UV ⚠ solapadas**: varias piezas comparten zona; un vinilo puede repetirse en varias.
+- **UV ✗ sin desplegado**: todas las mallas apuntan al mismo punto de la textura. Sólo se puede cambiar el
+  color; para vinilos habría que re-desplegar el modelo (editar el kn5), que ya no es una skin.
+- **⚠ kn5 cifrado/ilegible**: los mods "protegidos" llevan los vértices cifrados o barajados y sólo se ven
+  bien dentro de AC con CSP. En el editor el 3D sale como una maraña de triángulos, así que la colocación
+  sobre el coche se desactiva (aviso en la vista 3D); sí puedes pintar la textura en 2D y cambiar el color.
+  En estos coches una textura ampliada con dibujos suele verse mal en el juego porque no hay forma de saber
+  dónde cae cada zona: si sólo quieres otro color, mantén el tamaño original.
+
+## Medidas reales (cm)
+
+Cuando la geometría del coche es legible, el editor calcula cuántos píxeles de textura corresponden a un
+centímetro de carrocería. Con eso:
+
+- Las formas nuevas salen con tamaños razonables (rectángulo 60×30 cm, círculo Ø30 cm, texto de 15 cm…).
+- El panel de propiedades muestra **Ancho/Alto en cm**, un **deslizador de tamaño** (proporción fija) y un
+  **deslizador de ángulo** que actualizan el coche en vivo; el botón **1:1** recupera la proporción original.
+- "Tamaño en el coche (cm)" de la biblioteca fija la anchura con la que se colocan vinilos e imágenes, tanto
+  al soltarlos sobre el 3D como al añadirlos al lienzo 2D.
+
+Si la geometría no es fiable, todo se muestra en píxeles.
 
 ## Estructura del proyecto
 
@@ -142,8 +159,9 @@ python tests/make_fake_car.py                       # crea tests/fake_ac con un 
 AC_ROOT=tests/fake_ac python server.py 8766         # en Windows: set AC_ROOT=tests\fake_ac
 ```
 
-El coche de prueba tiene una skin normal (`default`), otra azul y una de color plano (`plano`, textura 4×4)
-para probar el flujo de los coches de un solo color.
+Se crean dos coches: `acpaint_testcar` (skins `default`, `azul` y `plano`, esta última con textura 4×4 para
+probar el flujo de los coches de un solo color) y `acpaint_testcar_enc`, con los vértices barajados y textura
+4×4, que simula un mod cifrado (aviso de kn5 ilegible y 3D bloqueado).
 
 ## Problemas frecuentes
 

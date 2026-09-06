@@ -5,7 +5,7 @@
 <title>AC Car Paint — editor de skins</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/web/style.css?v=3">
+<link rel="stylesheet" href="/web/style.css?v=4">
 <script src="/web/vendor/fabric.min.js"></script>
 <script type="importmap">
 {"imports": {"three": "/web/vendor/three/build/three.module.js", "three/addons/": "/web/vendor/three/examples/jsm/"}}
@@ -132,6 +132,7 @@
           <button id="btn-cam-rear" title="Vista trasera">R</button>
           <span id="v3d-status" class="hint"></span>
         </div>
+        <div id="v3d-warn" class="viewer-warn" hidden></div>
         <div class="viewer-hint hint">arrastra una capa sobre el coche para moverla · Ctrl+rueda: tamaño · Mayús+rueda: girar · arrastra un vinilo de la biblioteca hasta el coche · fondo: orbitar</div>
       </div>
       </div>
@@ -178,13 +179,16 @@
             <label>X <input type="number" id="p-left" step="1"></label>
             <label>Y <input type="number" id="p-top" step="1"></label>
           </div>
+          <label>Tamaño <span class="hint" id="p-sizehint"></span><input type="range" id="p-size" min="0" max="1000" step="1"></label>
           <div class="row">
-            <label>Ancho <input type="number" id="p-width" step="1" min="1"></label>
-            <label>Alto <input type="number" id="p-height" step="1" min="1"></label>
+            <label>Ancho (<span class="unit">px</span>) <input type="number" id="p-width" step="1" min="0.1"></label>
+            <label>Alto (<span class="unit">px</span>) <input type="number" id="p-height" step="1" min="0.1"></label>
           </div>
+          <label>Ángulo <span class="hint" id="p-anglehint"></span><input type="range" id="p-anglerange" min="-180" max="180" step="1"></label>
           <div class="row">
-            <label>Ángulo <input type="number" id="p-angle" step="1"></label>
-            <label class="chk"><input type="checkbox" id="p-lockratio" checked> proporción</label>
+            <label>Ángulo (°) <input type="number" id="p-angle" step="1"></label>
+            <label class="chk" title="Al cambiar ancho o alto se mantiene la proporción"><input type="checkbox" id="p-lockratio" checked> proporción</label>
+            <button id="p-ratio" title="Recupera la proporción original del vinilo/imagen" style="align-self:flex-end">1:1</button>
           </div>
           <div id="props-text" hidden>
             <label>Texto <textarea id="p-text" rows="2"></textarea></label>
@@ -253,7 +257,23 @@
   </form>
 </dialog>
 
+<dialog id="dlg-flat">
+  <form method="dialog">
+    <h2>Textura de color plano</h2>
+    <p id="flat-msg"></p>
+    <p class="hint">Si sólo quieres cambiar el color del coche, mantén el tamaño: es lo más seguro y lo que el coche espera.
+      Ampliar el lienzo permite pintar vinilos, pero sólo se verán bien si las mallas de la carrocería tienen un desplegado UV real
+      (mira el aviso "UV" junto a la textura tras abrirla).</p>
+    <p id="flat-warn" class="error"></p>
+    <menu>
+      <button value="keep" class="primary">Mantener tamaño (sólo color)</button>
+      <button value="2048">Ampliar a 2048 (vinilos)</button>
+      <button value="4096" class="ghost">Ampliar a 4096</button>
+    </menu>
+  </form>
+</dialog>
+
 <div id="toast" hidden></div>
-<script type="module" src="/web/app.js?v=3"></script>
+<script type="module" src="/web/app.js?v=4"></script>
 </body>
 </html>

@@ -83,6 +83,8 @@ label > input, label > select, label > textarea { color: var(--fg); }
 .canvas-wrap canvas { display: block; }
 .canvas-hint { position: absolute; left: 8px; bottom: 6px; font-size: 11px; color: var(--muted); pointer-events: none; }
 .viewer { position: relative; background: radial-gradient(ellipse at 50% 30%, #3a3f52 0, #171922 70%); }
+.viewer-warn { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); background: #3a2022ee; color: #ffb3b8; border: 1px solid var(--danger); border-radius: 10px; padding: 12px 16px; max-width: 80%; font-size: 13px; text-align: center; pointer-events: none; z-index: 2; }
+label > .hint { font-size: 11px; }
 .viewer canvas.over { cursor: grab; }
 .viewer canvas.place { cursor: crosshair; }
 .viewer canvas.dragging { cursor: grabbing; }

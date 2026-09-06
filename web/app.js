@@ -31,7 +31,7 @@ const status = (m) => ($('#ed-status').textContent = m || '');
 // ------------------------------------------------------------------ estado + rutas
 const S = { cars: [], car: null, carInfo: null, skins: [], skin: null, textures: [], tex: null, texInfo: null,
   proj: null, canvas: null, W: 0, H: 0, hist: [], hpos: -1, loading: false, dirty: false, uvImg: null,
-  layout: '3d', inRender: false, noOutline: false, uvInfo: null };
+  layout: '3d', inRender: false, noOutline: false, uvInfo: null, pxPerM: null, garbled: false };
 
 function route() {
   const h = location.hash.replace(/^#/, '') || 'cars';
@@ -271,10 +271,13 @@ async function switchTexture(name) {
   catch (e) { S.texInfo = { width: 2048, height: 2048, format: '?' }; }
   S.W = S.texInfo.width; S.H = S.texInfo.height;
   const saved = S.proj.textures[name];
+  S.pxPerM = null; S.garbled = false; S.uvInfo = null;
+  const uvp = api(`/api/cars/${enc(S.car)}/uvinfo/${enc(name)}`).catch(() => null);
   if (saved?.w && saved?.h) { S.W = saved.w; S.H = saved.h; }
   else if (Math.max(S.W, S.H) <= 64) {
-    S.W = S.H = 2048;
-    toast(`${name} es una textura de color plano (${S.texInfo.width}×${S.texInfo.height}): lienzo ampliado a 2048×2048 para poder pintar vinilos`);
+    const u = await uvp;
+    const pick = await askFlatSize(name, u);
+    if (pick !== 'keep') S.W = S.H = +pick;
   }
   fillSizeSelect();
   $('#ed-base').value = saved?.base || 'orig';
@@ -289,7 +292,23 @@ async function switchTexture(name) {
   fitZoom(); renderLayers(); showProps(); scheduleLive(); updateUV();
   bind3DTexture();
   status(`${name} · ${S.W}×${S.H} · ${S.texInfo.format || ''} (${S.texInfo.source === 'kn5' ? 'del kn5, no está en la skin' : S.texInfo.source})`);
-  updateUVInfo();
+  uvp.then((u) => { if (S.tex === name) applyUVInfo(u); });
+}
+/** Textura de color plano (1×1, 4×4…): ¿mantener el tamaño (sólo color) o ampliar el lienzo para vinilos? */
+function askFlatSize(name, u) {
+  const d = $('#dlg-flat');
+  $('#flat-msg').textContent = `${name} mide ${S.texInfo.width}×${S.texInfo.height} píxeles: el coche usa un color único para esta pieza.`;
+  let warn = '';
+  if (u?.encrypted_suspect) warn = 'La geometría de este kn5 no se puede leer (mod cifrado o protegido): no hay forma de saber dónde caería cada vinilo. Recomendado: mantener el tamaño.';
+  else if (u?.degenerate) warn = 'Las mallas no tienen desplegado UV: al ampliar, cualquier dibujo se vería como un color uniforme. Recomendado: mantener el tamaño.';
+  else if (u && u.layers > 1.6 && u.mirrored > 0.25) warn = 'Los dos lados del coche comparten UV: los vinilos saldrán en ambos lados (uno en espejo).';
+  $('#flat-warn').textContent = warn;
+  return new Promise((res) => {
+    let done = false; const finish = (v) => { if (!done) { done = true; res(v || 'keep'); } };
+    for (const b of d.querySelectorAll('menu button')) b.onclick = (e) => { e.preventDefault(); d.close(b.value); finish(b.value); };
+    d.oncancel = () => finish('keep'); d.onclose = () => finish(d.returnValue);   // Escape / cierre externo
+    d.showModal();
+  });
 }
 $('#ed-texture').onchange = (e) => switchTexture(e.target.value);
 
@@ -315,27 +334,32 @@ function resizeCanvas(w, h) {
   const fx = w / S.W, fy = h / S.H;
   for (const o of c.getObjects()) { o.set({ left: o.left * fx, top: o.top * fy, scaleX: o.scaleX * fx, scaleY: o.scaleY * fy }); o.setCoords(); }
   applyCanvasSize(w, h);
+  S.pxPerM = S.uvInfo?.uv_per_m ? S.uvInfo.uv_per_m * (w + h) / 2 : null;
   fitZoom(); updateUV(); pushHistory(); scheduleLive(); S.dirty = true; renderLayers(); showProps();
   status(`Lienzo ${w}×${h}`);
 }
 
 // diagnóstico del desplegado UV: ¿se pueden poner vinilos en esta textura?
-async function updateUVInfo() {
-  const b = $('#ed-uv'); b.hidden = true; const tex = S.tex; S.uvInfo = null;
+function applyUVInfo(u) {
+  const b = $('#ed-uv'); b.hidden = true; S.uvInfo = u || null;
+  S.garbled = !!u?.encrypted_suspect;
+  S.pxPerM = u?.uv_per_m ? u.uv_per_m * (S.W + S.H) / 2 : null;
+  const w = $('#v3d-warn'); w.hidden = !S.garbled;
+  if (S.garbled) w.textContent = 'La geometría de este kn5 no se puede leer (mod cifrado/protegido): la vista 3D no es fiable y no se puede colocar sobre el coche. Pinta en la textura 2D.';
+  showProps();
+  if (!u) return;
   try {
-    const u = await api(`/api/cars/${enc(S.car)}/uvinfo/${enc(tex)}`);
-    if (S.tex !== tex) return;
-    S.uvInfo = u;
     const pct = (x) => (x * 100).toFixed(0) + ' %';
     let cls = '', txt = '';
     let tip = `${u.meshes} mallas · ${u.triangles} triángulos · cobertura ${pct(u.coverage)} · ${u.layers} capas · espejo ${pct(u.mirrored)}`;
-    if (u.encrypted_suspect) { cls = 'bad'; txt = '⚠ kn5 posiblemente cifrado: 3D y UV no fiables'; tip += ` · normales no unitarias ${pct(u.bad_normals)}. Los mods protegidos (cifrados) sólo se ven bien dentro de AC con CSP; aquí no se puede colocar sobre el 3D, sólo pintar en 2D.`; }
+    if (u.encrypted_suspect) { cls = 'bad'; txt = '⚠ kn5 cifrado/ilegible: 3D y UV no fiables'; tip += ` · geometría barajada ${pct(u.garbled)} · normales no unitarias ${pct(u.bad_normals)}. Los mods protegidos (cifrados) sólo se ven bien dentro de AC con CSP; aquí no se puede colocar sobre el 3D, sólo pintar en 2D.`; }
     else if (u.triangles === 0) { cls = 'warn'; txt = 'UV: ninguna malla visible usa esta textura'; }
     else if (u.degenerate) { cls = 'bad'; txt = 'UV ✗ sin desplegado: sólo se puede cambiar el color'; tip += '. Todas las mallas apuntan al mismo punto de la textura: cualquier dibujo se vería como un color uniforme. Para vinilos habría que re-desplegar el modelo (kn5), no basta una skin.'; }
     else if (u.layers > 1.6 && u.mirrored > 0.25) { cls = 'warn'; txt = `UV ⚠ simétricas · ${pct(u.coverage)} del lienzo`; tip += '. Los dos lados del coche comparten la misma zona de textura: un vinilo aparece en ambos lados y en uno se ve invertido (usa formas simétricas o dorsales).'; }
     else if (u.layers > 1.6) { cls = 'warn'; txt = `UV ⚠ solapadas · ${pct(u.coverage)} del lienzo`; tip += '. Varias mallas comparten la misma zona de textura: un vinilo puede repetirse en varias piezas.'; }
     else txt = `UV ✓ ${pct(u.coverage)} del lienzo`;
     if (Math.max(S.texInfo.width, S.texInfo.height) <= 64 && !u.degenerate && !u.encrypted_suspect) tip += ' · La textura original es de color plano, pero las UV están desplegadas: con el lienzo ampliado se pueden pintar vinilos en todo el coche.';
+    if (S.pxPerM) tip += ` · ${(S.pxPerM / 100).toFixed(1)} px/cm en el lienzo`;
     b.textContent = txt; b.title = tip; b.className = 'uvbadge ' + cls; b.hidden = false;
   } catch (e) { /* sin diagnóstico */ }
 }
@@ -389,6 +413,9 @@ $('#btn-redo').onclick = () => restoreHistory(S.hpos + 1);
 
 // ------------------------------------------------------------------ añadir objetos
 const DEF = () => ({ fill: libC1() || '#ffffff', stroke: null, strokeWidth: 0, originX: 'center', originY: 'center', left: S.W / 2, top: S.H / 2 });
+/** cm reales -> píxeles del lienzo (si se conoce la densidad de texels); si no, fracción del lienzo. */
+const cm = (n, frac) => (S.pxPerM ? (n / 100) * S.pxPerM : frac * S.W);
+const libCm = () => +$('#lib-size3d').value || 50;
 function add(obj, name, kind) {
   obj.set({ name, kind }); S.canvas.add(obj); S.canvas.setActiveObject(obj); S.canvas.requestRenderAll();
 }
@@ -397,15 +424,15 @@ function starPoints(n, r1, r2) {
 }
 const ADD = {
   base: () => add(new fabric.Rect({ left: 0, top: 0, originX: 'left', originY: 'top', width: S.W, height: S.H, fill: '#c81e1e', selectable: true, lockMovementX: true, lockMovementY: true, hasControls: false }), 'Color base', 'base'),
-  rect: () => add(new fabric.Rect({ ...DEF(), width: S.W / 4, height: S.H / 8 }), 'Rectángulo', 'shape'),
-  circle: () => add(new fabric.Circle({ ...DEF(), radius: S.W / 12 }), 'Círculo', 'shape'),
-  ring: () => add(new fabric.Circle({ ...DEF(), radius: S.W / 12, fill: '', stroke: $('#brush-color').value, strokeWidth: S.W / 100 }), 'Anillo', 'shape'),
-  triangle: () => add(new fabric.Triangle({ ...DEF(), width: S.W / 6, height: S.H / 6 }), 'Triángulo', 'shape'),
-  stripe: () => add(new fabric.Rect({ ...DEF(), width: S.W, height: S.H / 30 }), 'Franja', 'shape'),
-  star: () => add(new fabric.Polygon(starPoints(5, S.W / 12, S.W / 30), { ...DEF() }), 'Estrella', 'shape'),
-  chevron: () => { const w = S.W / 6, h = S.H / 10, t = h * 0.45; add(new fabric.Polygon([{ x: 0, y: h }, { x: w / 2, y: 0 }, { x: w, y: h }, { x: w - t, y: h }, { x: w / 2, y: t }, { x: t, y: h }], { ...DEF() }), 'Chevrón', 'shape'); },
-  text: () => add(new fabric.IText('TEXTO', { ...DEF(), fontFamily: 'Impact', fontSize: S.W / 12, fill: '#ffffff' }), 'Texto', 'text'),
-  number: () => { const sk = S.skins.find((s) => s.id === S.skin); add(new fabric.IText(String(sk?.meta?.number || '7'), { ...DEF(), fontFamily: 'Arial Black', fontWeight: 'bold', fontSize: S.W / 6, fill: '#ffffff', stroke: '#000000', strokeWidth: S.W / 200 }), 'Dorsal', 'text'); },
+  rect: () => add(new fabric.Rect({ ...DEF(), width: cm(60, 1 / 4), height: cm(30, 1 / 8) }), 'Rectángulo', 'shape'),
+  circle: () => add(new fabric.Circle({ ...DEF(), radius: cm(15, 1 / 12) }), 'Círculo', 'shape'),
+  ring: () => add(new fabric.Circle({ ...DEF(), radius: cm(15, 1 / 12), fill: '', stroke: $('#brush-color').value, strokeWidth: cm(2, 1 / 100) }), 'Anillo', 'shape'),
+  triangle: () => add(new fabric.Triangle({ ...DEF(), width: cm(40, 1 / 6), height: cm(40, 1 / 6) }), 'Triángulo', 'shape'),
+  stripe: () => add(new fabric.Rect({ ...DEF(), width: S.W, height: cm(8, 1 / 30) }), 'Franja', 'shape'),
+  star: () => add(new fabric.Polygon(starPoints(5, cm(15, 1 / 12), cm(6, 1 / 30)), { ...DEF() }), 'Estrella', 'shape'),
+  chevron: () => { const w = cm(40, 1 / 6), h = cm(25, 1 / 10), t = h * 0.45; add(new fabric.Polygon([{ x: 0, y: h }, { x: w / 2, y: 0 }, { x: w, y: h }, { x: w - t, y: h }, { x: w / 2, y: t }, { x: t, y: h }], { ...DEF() }), 'Chevrón', 'shape'); },
+  text: () => add(new fabric.IText('TEXTO', { ...DEF(), fontFamily: 'Impact', fontSize: cm(15, 1 / 12), fill: '#ffffff' }), 'Texto', 'text'),
+  number: () => { const sk = S.skins.find((s) => s.id === S.skin); add(new fabric.IText(String(sk?.meta?.number || '7'), { ...DEF(), fontFamily: 'Arial Black', fontWeight: 'bold', fontSize: cm(40, 1 / 6), fill: '#ffffff', stroke: '#000000', strokeWidth: cm(1, 1 / 200) }), 'Dorsal', 'text'); },
   image: () => $('#file-decal').click(),
   brush: () => toggleBrush(),
 };
@@ -505,7 +532,7 @@ function addFromLibrary(type, name, x = S.W / 2, y = S.H / 2, cb) {
   if (type === 'vinyl') {
     fabric.loadSVGFromString(VINYLS[name].svg(c1, c2), (objs, opts) => {
       const g = fabric.util.groupSVGElements(objs, opts);
-      const s = (S.W / 4) / g.width; g.set({ originX: 'center', originY: 'center', left: x, top: y, scaleX: s, scaleY: s });
+      const s = cm(libCm(), 1 / 4) / g.width; g.set({ originX: 'center', originY: 'center', left: x, top: y, scaleX: s, scaleY: s });
       add(g, VINYLS[name].label, 'vinyl'); cb && cb(g);
     });
   } else if (type === 'pattern') {
@@ -515,7 +542,7 @@ function addFromLibrary(type, name, x = S.W / 2, y = S.H / 2, cb) {
     const url = type === 'decal' ? decalUrl(name) : libImgUrl(name);
     fabric.Image.fromURL(url, (img) => {
       if (!img || !img.width) return toast('No se pudo cargar ' + name, true);
-      const s = Math.min(1, (S.W / 4) / img.width); img.set({ originX: 'center', originY: 'center', left: x, top: y, scaleX: s, scaleY: s });
+      const s = (S.pxPerM ? cm(libCm(), 1 / 4) : Math.min(img.width, S.W / 4)) / img.width; img.set({ originX: 'center', originY: 'center', left: x, top: y, scaleX: s, scaleY: s });
       add(img, name, 'image'); cb && cb(img);
     }, { crossOrigin: 'anonymous' });
   }
@@ -636,11 +663,10 @@ function surfaceFrame(hit) {
 /** Coloca un elemento de la biblioteca sobre el coche en el punto tocado: orientado como se ve desde la
  *  cámara (aunque la isla UV esté girada o en espejo) y con la anchura en cm elegida. */
 function placeOnCar(type, name, uv, cb) {
-  const fr = uv.hit ? surfaceFrame(uv.hit) : null;
+  const fr = uv.hit && !S.garbled ? surfaceFrame(uv.hit) : null;
   addFromLibrary(type, name, uv.x, uv.y, (obj) => {
     if (fr && type !== 'pattern') {
-      const cm = +$('#lib-size3d').value || 50;
-      const px = Math.min(S.W * 2, Math.max(4, (cm / 100) * fr.pxPerM));
+      const px = Math.min(S.W * 2, Math.max(4, (libCm() / 100) * fr.pxPerM));
       const sc = px / obj.width;
       obj.set({ scaleX: sc, scaleY: sc, angle: (fr.angle + 360) % 360, flipY: fr.flipY });
       obj.setCoords(); S.canvas.requestRenderAll(); scheduleLive();
@@ -664,6 +690,7 @@ function setup3DInteraction() {
   // en fase de captura: si empezamos a arrastrar una capa, OrbitControls (enabled=false) no orbita
   cv.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || !S.canvas) return;
+    if (S.garbled) { if (S.armed) { disarm(); status('Este kn5 no se puede leer: coloca el vinilo en la textura 2D'); } return; }
     down = { x: e.clientX, y: e.clientY };
     const uv = pickUV(e);
     if (!uv) return;                                   // fondo o pieza sin esta textura: orbitar
@@ -768,8 +795,13 @@ function showProps() {
   $('#p-stroke').value = toHex(o.stroke || '#000000'); $('#p-strokew').value = o.strokeWidth || 0;
   $('#p-opacity').value = o.opacity ?? 1; $('#p-blend').value = o.globalCompositeOperation || 'source-over';
   $('#p-left').value = Math.round(o.left); $('#p-top').value = Math.round(o.top);
-  $('#p-width').value = Math.round(o.getScaledWidth()); $('#p-height').value = Math.round(o.getScaledHeight());
-  $('#p-angle').value = Math.round(o.angle || 0);
+  const k = S.pxPerM ? 100 / S.pxPerM : 1; const dec = S.pxPerM ? 1 : 0;   // px -> cm
+  for (const u of $$('#props-body .unit')) u.textContent = S.pxPerM ? 'cm' : 'px';
+  $('#p-width').step = S.pxPerM ? 0.5 : 1; $('#p-height').step = S.pxPerM ? 0.5 : 1;
+  $('#p-width').value = (o.getScaledWidth() * k).toFixed(dec); $('#p-height').value = (o.getScaledHeight() * k).toFixed(dec);
+  $('#p-size').value = sizeToSlider(o.getScaledWidth());
+  $('#p-sizehint').textContent = sizeText(o);
+  const ang = Math.round(o.angle || 0); $('#p-angle').value = ang; $('#p-anglerange').value = ((ang + 180) % 360 + 360) % 360 - 180; $('#p-anglehint').textContent = ang + '°';
   const isText = single && o.type === 'i-text';
   $('#props-text').hidden = !isText;
   if (isText) {
@@ -805,16 +837,32 @@ P('p-blend').onchange = (e) => setProp((t) => t.set('globalCompositeOperation', 
 P('p-left').onchange = (e) => { if (propsObj) { propsObj.set('left', +e.target.value); propsObj.setCoords(); S.canvas.requestRenderAll(); pushHistory(); } };
 P('p-top').onchange = (e) => { if (propsObj) { propsObj.set('top', +e.target.value); propsObj.setCoords(); S.canvas.requestRenderAll(); pushHistory(); } };
 P('p-angle').onchange = (e) => { if (propsObj) { propsObj.rotate(+e.target.value); propsObj.setCoords(); S.canvas.requestRenderAll(); pushHistory(); } };
-P('p-width').onchange = (e) => sizeObj(+e.target.value, null);
-P('p-height').onchange = (e) => sizeObj(null, +e.target.value);
+const toPx = (v) => (S.pxPerM ? (v / 100) * S.pxPerM : v);
+const sizeText = (o) => (S.pxPerM ? `${(o.getScaledWidth() * 100 / S.pxPerM).toFixed(0)} × ${(o.getScaledHeight() * 100 / S.pxPerM).toFixed(0)} cm en el coche` : `${Math.round(o.getScaledWidth())} × ${Math.round(o.getScaledHeight())} px`);
+P('p-width').onchange = (e) => sizeObj(toPx(+e.target.value), null);
+P('p-height').onchange = (e) => sizeObj(null, toPx(+e.target.value));
+/** Cambia el tamaño (en px del lienzo) manteniendo la proporción actual si está marcado. */
 function sizeObj(w, h) {
-  const o = propsObj; if (!o) return;
-  const keep = P('p-lockratio').checked;
-  if (w) { const s = w / o.width; o.scaleX = s; if (keep) o.scaleY = s * (o.scaleY / o.scaleX || 1) || s; }
-  if (h) { const s = h / o.height; o.scaleY = s; if (keep) o.scaleX = s; }
-  if (keep && w) o.scaleY = o.scaleX; if (keep && h) o.scaleX = o.scaleY;
-  o.setCoords(); S.canvas.requestRenderAll(); pushHistory(); scheduleLive(); showProps();
+  const o = propsObj; if (!o || !(w > 0 || h > 0)) return;
+  const keep = P('p-lockratio').checked; const ratio = o.scaleY / o.scaleX || 1;
+  if (w > 0) { o.scaleX = w / o.width; if (keep) o.scaleY = o.scaleX * ratio; }
+  if (h > 0) { o.scaleY = h / o.height; if (keep) o.scaleX = o.scaleY / ratio; }
+  o.setCoords(); S.canvas.requestRenderAll(); S.dirty = true; pushHistory(); scheduleLive(); showProps();
 }
+// deslizador logarítmico de tamaño: de 1 cm (o 4 px) hasta 2× el ancho del lienzo
+const sliderMin = () => (S.pxPerM ? S.pxPerM / 100 : 4), sliderMax = () => S.W * 2;
+const sizeToSlider = (px) => Math.round(1000 * Math.log(Math.max(px, sliderMin()) / sliderMin()) / Math.log(sliderMax() / sliderMin()));
+const sliderToSize = (v) => sliderMin() * Math.pow(sliderMax() / sliderMin(), v / 1000);
+P('p-size').oninput = (e) => {
+  const o = propsObj; if (!o) return;
+  const w = sliderToSize(+e.target.value); const r = o.scaleY / o.scaleX || 1;
+  o.scaleX = w / o.width; o.scaleY = o.scaleX * r; o.setCoords(); S.canvas.requestRenderAll(); S.dirty = true; liveNow();
+  P('p-sizehint').textContent = sizeText(o);
+};
+P('p-size').onchange = () => { pushHistory(); showProps(); };
+P('p-anglerange').oninput = (e) => { const o = propsObj; if (!o) return; o.rotate(+e.target.value); o.setCoords(); S.canvas.requestRenderAll(); S.dirty = true; liveNow(); P('p-anglehint').textContent = e.target.value + '°'; P('p-angle').value = e.target.value; };
+P('p-anglerange').onchange = () => { pushHistory(); showProps(); };
+P('p-ratio').onclick = () => { const o = propsObj; if (!o) return; o.scaleY = o.scaleX; o.setCoords(); S.canvas.requestRenderAll(); pushHistory(); scheduleLive(); showProps(); };
 P('p-text').oninput = (e) => setProp((t) => t.set('text', e.target.value));
 P('p-font').onchange = (e) => setProp((t) => t.set('fontFamily', e.target.value));
 P('p-bold').onchange = (e) => setProp((t) => t.set('fontWeight', e.target.checked ? 'bold' : 'normal'));

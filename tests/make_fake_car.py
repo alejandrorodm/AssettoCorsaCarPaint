@@ -37,6 +37,33 @@ def box(size, uv_rect, center=(0, 0, 0)):
     return np.array(V, np.float32), np.array(I, np.uint16)
 
 
+def grid_box(size, n=16, center=(0, 0, 0), shuffle=False):
+    """Caja con cada cara subdividida n×n (suficientes triángulos para el detector de geometría barajada).
+    shuffle=True permuta los vértices: simula un mod cifrado (índices que unen vértices al azar)."""
+    sx, sy, sz = size; cx, cy, cz = center
+    faces = [((1, 0, 0), (0, 0, 1), (0, 1, 0)), ((-1, 0, 0), (0, 0, -1), (0, 1, 0)),
+             ((0, 1, 0), (1, 0, 0), (0, 0, 1)), ((0, -1, 0), (1, 0, 0), (0, 0, -1)),
+             ((0, 0, 1), (-1, 0, 0), (0, 1, 0)), ((0, 0, -1), (1, 0, 0), (0, 1, 0))]
+    V, I = [], []
+    half = np.array([sx, sy, sz]) / 2
+    for nrm, a, b in faces:
+        nrm, a, b = np.array(nrm, float), np.array(a, float), np.array(b, float)
+        base = len(V)
+        for i in range(n + 1):
+            for j in range(n + 1):
+                sa, sb = -1 + 2 * i / n, -1 + 2 * j / n
+                p = (nrm + sa * a + sb * b) * half + np.array([cx, cy, cz])
+                V.append([*p, *nrm, (sa + 1) / 2, (1 - sb) / 2, *a])
+        for i in range(n):
+            for j in range(n):
+                k = base + i * (n + 1) + j
+                I += [k, k + 1, k + n + 1, k + 1, k + n + 2, k + n + 1]
+    V = np.array(V, np.float32); I = np.array(I, np.uint16)
+    if shuffle:
+        rng = np.random.default_rng(1); perm = rng.permutation(len(V)); V = V[perm]
+    return V, I
+
+
 def mesh_bytes(name, V, I, mat):
     b = struct.pack("<i", 2) + _s(name) + struct.pack("<iB", 0, 1) + struct.pack("<BBB", 1, 1, 0)
     b += struct.pack("<i", len(V)) + V.astype("<f4").tobytes()
@@ -75,19 +102,24 @@ def body_texture(size=1024):
 
 
 def main(root):
-    car = "acpaint_testcar"
+    build_car(root, "acpaint_testcar")
+    build_car(root, "acpaint_testcar_enc", encrypted=True)
+
+
+def build_car(root, car, encrypted=False):
+    """encrypted=True: carrocería con vértices barajados y textura de color 4×4 (como un mod protegido)."""
     cp = os.path.join(root, "content", "cars", car)
     os.makedirs(os.path.join(cp, "ui"), exist_ok=True)
     os.makedirs(os.path.join(cp, "skins", "default"), exist_ok=True)
     os.makedirs(os.path.join(cp, "skins", "azul"), exist_ok=True)
-    json.dump({"name": "ACPaint Test Car", "brand": "ACPaint", "class": "race", "tags": ["test"], "year": 2026},
+    json.dump({"name": "ACPaint Test Car" + (" (cifrado)" if encrypted else ""), "brand": "ACPaint", "class": "race", "tags": ["test"], "year": 2026},
               open(os.path.join(cp, "ui", "ui_car.json"), "w"))
     Image.new("RGBA", (64, 64), (255, 128, 0, 255)).save(os.path.join(cp, "ui", "badge.png"))
     body = D.encode(body_texture(), "DXT5")
     wheel = D.encode(Image.new("RGBA", (256, 256), (40, 40, 40, 255)), "DXT1")
     glass = D.encode(Image.new("RGBA", (64, 64), (120, 160, 200, 120)), "DXT5")
     # carrocería: capó/techo/laterales en la mitad superior/inferior de la textura
-    V1, I1 = box((1.8, 0.6, 4.2), (0, 0, 1, 1), (0, 0.55, 0))
+    V1, I1 = grid_box((1.8, 0.6, 4.2), 16, (0, 0.55, 0), shuffle=encrypted) if encrypted else box((1.8, 0.6, 4.2), (0, 0, 1, 1), (0, 0.55, 0))
     V2, I2 = box((1.5, 0.5, 2.0), (0, 0, 1, 1), (0, 1.1, -0.3))
     wheels = []
     for i, (x, z) in enumerate([(-0.9, 1.4), (0.9, 1.4), (-0.9, -1.4), (0.9, -1.4)]):
@@ -111,7 +143,7 @@ def main(root):
         im = body_texture()
         if skin == "azul":
             im = Image.merge("RGBA", (im.getchannel("B"), im.getchannel("G"), im.getchannel("R"), im.getchannel("A")))
-        if skin == "plano":   # coche de un solo color: textura 4x4 (como car_paint.dds de muchos coches)
+        if skin == "plano" or encrypted:   # coche de un solo color: textura 4x4 (como car_paint.dds de muchos coches)
             im = Image.new("RGBA", (4, 4), col + (255,))
         open(os.path.join(sp, "Skin_00.dds"), "wb").write(D.encode(im, "DXT5"))
         json.dump({"skinname": skin.title(), "drivername": "Piloto", "country": "Spain", "team": "ACPaint", "number": "7", "priority": 1},

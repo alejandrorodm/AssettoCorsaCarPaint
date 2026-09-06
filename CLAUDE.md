@@ -54,7 +54,18 @@ función; resumen enumerado al acabar para que el usuario pruebe en AC).
   capas) y `write_texture` escribe el DDS al tamaño del lienzo (el alpha original se reescala si se conserva).
   `/api/cars/{car}/uvinfo/{name}` (`kn5.uv_info`) da cobertura/capas/espejo/degeneradas y
   `encrypted_suspect` (normales no unitarias > 20 %: mods cifrados, geometría ilegible).
-- `window.ACP = {S, V, fabric, THREE}` para pruebas con puppeteer (`scratchpad/test3d.js`).
+- Medidas en cm: `uv_info` devuelve `uv_per_m` (√(área UV / área mundo) de las mallas de la textura);
+  `S.pxPerM = uv_per_m · (W+H)/2`. `cm(n, frac)` en `app.js` convierte cm → px (o fracción del lienzo si no
+  hay densidad). Geometría barajada (`k.garbled`: mediana de arista / diagonal de la malla > 0.12 en mallas
+  de ≥ 200 triángulos) ⇒ `encrypted_suspect`, sin `uv_per_m`, 3D bloqueado (`S.garbled`). El coche
+  `acpaint_testcar_enc` de `make_fake_car.py` lo reproduce; un kn5 barajado da `mirrored ≈ 0.5`.
+- Texturas ≤ 64 px: diálogo `#dlg-flat` (mantener / 2048 / 4096) en `switchTexture`, salvo que el proyecto
+  ya guarde `w/h`. Se resuelve desde los `onclick` de los botones: en el editor el evento `close` del
+  `<dialog>` no llegó a dispararse en Chrome 152 headless (sí en una página vacía), así que no confiar en él.
+- `window.ACP = {S, V, fabric, THREE}` para pruebas con puppeteer (`scratchpad/test3d.js`, `test_v2.js`).
+  En el Bash de la sesión, `pkill -f`/`pgrep -f` con un patrón que aparezca en la propia línea de comando
+  mata la shell (exit 144): matar por puerto (`ss -ltnp | grep 8766`). Con el coche barajado y lienzo 4×4 la
+  captura de puppeteer tumba el renderer (headless/swiftshader), no la app.
 
 ## Hechos verificados
 - `toCanvasElement` de Fabric ya pone `interactive=false` (no dibuja controles) y dispara `after:render`:
