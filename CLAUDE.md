@@ -42,7 +42,24 @@ función; resumen enumerado al acabar para que el usuario pruebe en AC).
   del kn5 (three r160 no aplica transformaciones) → píxel = (u·W, v·H). `S.armed` guarda el elemento
   pendiente de colocar (casilla "colocar en 3D"); Escape / cerrar editor desarma.
 
+- Interacción 3D (`setup3DInteraction`): listener `pointerdown` en fase de captura; si se toca una capa
+  se pone `V.controls.enabled=false` antes de que OrbitControls vea el evento (r160 comprueba `enabled` al
+  principio de `onPointerDown`). `surfaceFrame(hit)` calcula dP/du, dP/dv del triángulo tocado y proyecta
+  el "derecha/arriba" de la cámara a píxeles de textura → `angle`, `flipY` (isla en espejo) y `pxPerM`
+  (tamaño en cm). El arrastre sigue el raycast; un salto > 15 % del lienzo se interpreta como cambio de
+  isla UV y el objeto pasa a quedar bajo el cursor.
+- Disposición: `setLayout('3d'|'2d')` mueve `#viewer` y `#canvas-wrap` entre `#main` y `#side-top`
+  (los canvas conservan su contexto al moverse en el DOM); se guarda en `localStorage acpaint.layout`.
+- Texturas de color plano (≤ 64 px): el lienzo pasa a 2048 (selector `#ed-size`, `resizeCanvas` escala las
+  capas) y `write_texture` escribe el DDS al tamaño del lienzo (el alpha original se reescala si se conserva).
+  `/api/cars/{car}/uvinfo/{name}` (`kn5.uv_info`) da cobertura/capas/espejo/degeneradas y
+  `encrypted_suspect` (normales no unitarias > 20 %: mods cifrados, geometría ilegible).
+- `window.ACP = {S, V, fabric, THREE}` para pruebas con puppeteer (`scratchpad/test3d.js`).
+
 ## Hechos verificados
+- `toCanvasElement` de Fabric ya pone `interactive=false` (no dibuja controles) y dispara `after:render`:
+  `renderTexture` marca `S.inRender` para que el handler de `after:render` no reprograme el render en vivo
+  (antes había un bucle continuo cada 120 ms y se perdía la selección/edición de texto).
 - Fabric 5.3.0 usa `textBaseline='alphabetical'` (aviso en Chrome nuevo): parcheado a `alphabetic` en
   `web/vendor/fabric.min.js`.
 - `[hidden]` necesita `display:none !important` porque `.sub`/`.props` fijan `display:flex`.
