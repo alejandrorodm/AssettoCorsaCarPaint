@@ -105,11 +105,14 @@ def main(root):
         f.write(material("Body", "Skin_00.dds") + material("Wheel", "wheel.dds", "ksPerPixel") + material("Glass", "glass.dds", "ksPerPixelAlpha"))
         f.write(root_node)
     open(os.path.join(cp, "lods.ini"), "w").write(f"[LOD_0]\nFILE={car}.kn5\nIN=0\nOUT=30\n")
-    for skin, col in (("default", (200, 30, 30)), ("azul", (30, 40, 160))):
+    os.makedirs(os.path.join(cp, "skins", "plano"), exist_ok=True)
+    for skin, col in (("default", (200, 30, 30)), ("azul", (30, 40, 160)), ("plano", (240, 200, 40))):
         sp = os.path.join(cp, "skins", skin)
         im = body_texture()
         if skin == "azul":
             im = Image.merge("RGBA", (im.getchannel("B"), im.getchannel("G"), im.getchannel("R"), im.getchannel("A")))
+        if skin == "plano":   # coche de un solo color: textura 4x4 (como car_paint.dds de muchos coches)
+            im = Image.new("RGBA", (4, 4), col + (255,))
         open(os.path.join(sp, "Skin_00.dds"), "wb").write(D.encode(im, "DXT5"))
         json.dump({"skinname": skin.title(), "drivername": "Piloto", "country": "Spain", "team": "ACPaint", "number": "7", "priority": 1},
                   open(os.path.join(sp, "ui_skin.json"), "w"))

@@ -6,6 +6,7 @@
 """
 import hashlib
 import io
+import json
 import os
 import subprocess
 import sys
@@ -123,6 +124,15 @@ def api_uv(car: str, name: str, size: int = 2048):
         im = kn5.uv_template(cars.load_kn5(car), name, size)
         b = io.BytesIO(); im.save(b, "PNG"); return b.getvalue()
     return FileResponse(_cached_file(key, ".png", build), media_type="image/png")
+
+
+@app.get("/api/cars/{car}/uvinfo/{name}")
+def api_uvinfo(car: str, name: str):
+    p = err(cars.main_kn5, car)
+    sig = f"{os.path.getsize(p)}_{int(os.path.getmtime(p))}"
+    key = "uvinfo_" + hashlib.md5(f"{car}|{name}|{sig}|2".encode()).hexdigest()
+    path = _cached_file(key, ".json", lambda: json.dumps(err(cars.texture_uv_info, car, name)).encode())
+    return FileResponse(path, media_type="application/json")
 
 
 # ------------------------------------------------------------------ skins

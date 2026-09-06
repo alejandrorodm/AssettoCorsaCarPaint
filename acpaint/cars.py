@@ -198,6 +198,11 @@ def texture_png(car, skin, name, src="skin"):
     b = io.BytesIO(); im.save(b, "PNG"); return b.getvalue(), src
 
 
+def texture_uv_info(car, name):
+    k = load_kn5(car)
+    return K.uv_info(k, name)
+
+
 def texture_info(car, skin, name):
     raw, src = texture_bytes(car, skin, name)
     if raw[:4] == b"DDS ":
@@ -286,6 +291,11 @@ def write_texture(car, skin, name, png_bytes, fmt=None, keep_alpha=True):
     if not name.lower().endswith(".dds"):
         raise ValueError("sólo se escriben texturas .dds")
     img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+    # el DDS se escribe al tamaño del lienzo: así una textura de color plano (1×1/4×4) puede ampliarse a
+    # 2048/4096 para pintar vinilos; AC acepta cualquier tamaño potencia de 2
+    if img.width & (img.width - 1) or img.height & (img.height - 1):
+        w = 1 << max(2, (img.width - 1).bit_length()); h = 1 << max(2, (img.height - 1).bit_length())
+        img = img.resize((w, h), Image.LANCZOS)
     orig = None
     try:
         raw, _ = texture_bytes(car, skin, name)
@@ -294,13 +304,14 @@ def write_texture(car, skin, name, png_bytes, fmt=None, keep_alpha=True):
             orig = D.decode(raw)
             if fmt is None:
                 fmt = "DXT1" if ofmt == "DXT1" else "DXT5"
-            if img.size != orig.size:
-                img = img.resize(orig.size, Image.LANCZOS)
     except FileNotFoundError:
         pass
     fmt = fmt or "DXT5"
     if keep_alpha and orig is not None:
-        img.putalpha(orig.getchannel("A"))
+        alpha = orig.getchannel("A")
+        if alpha.size != img.size:
+            alpha = alpha.resize(img.size, Image.LANCZOS)
+        img.putalpha(alpha)
     backup_original(car, skin, name)
     data = D.encode(img, fmt)
     with open(os.path.join(skin_path(car, skin), name), "wb") as f:
