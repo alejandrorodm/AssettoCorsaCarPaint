@@ -72,10 +72,20 @@ label > input, label > select, label > textarea { color: var(--fg); }
 .layer .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .layer .eye, .layer .lk { background: none; border: 0; padding: 0 2px; font-size: 12px; opacity: .7; }
 .layer .eye.off { opacity: .25; }
+.main { flex: 1; min-width: 0; display: flex; }
+.main > * { flex: 1; min-width: 0; height: auto; }
+.side-top { height: 300px; flex: none; display: flex; border-bottom: 1px solid var(--line); }
+.side-top > * { flex: 1; min-width: 0; height: auto; }
+.uvbadge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #2a3a2a; color: #9fe0b0; border: 1px solid #3fbf7f55; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
+.uvbadge.warn { background: #3a3220; color: #ffd28a; border-color: #ffa25a66; }
+.uvbadge.bad { background: #3a2022; color: #ff9aa0; border-color: #e0454f66; }
 .canvas-wrap { flex: 1; min-width: 0; position: relative; background: #0b0c10 repeating-conic-gradient(#15171d 0 25%, #0b0c10 0 50%) 0 0/24px 24px; overflow: hidden; }
 .canvas-wrap canvas { display: block; }
 .canvas-hint { position: absolute; left: 8px; bottom: 6px; font-size: 11px; color: var(--muted); pointer-events: none; }
-.viewer { position: relative; background: radial-gradient(ellipse at 50% 30%, #3a3f52 0, #171922 70%); height: 300px; flex: none; }
+.viewer { position: relative; background: radial-gradient(ellipse at 50% 30%, #3a3f52 0, #171922 70%); }
+.viewer canvas.over { cursor: grab; }
+.viewer canvas.place { cursor: crosshair; }
+.viewer canvas.dragging { cursor: grabbing; }
 .viewer canvas { width: 100%; height: 100%; display: block; }
 .viewer-bar { position: absolute; left: 6px; bottom: 6px; display: flex; gap: 4px; align-items: center; }
 .viewer-bar button { padding: 2px 7px; font-size: 12px; background: #000a; }

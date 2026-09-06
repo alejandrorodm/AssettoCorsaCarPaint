@@ -1,2 +1,2 @@
 """AssettoCorsaCarPaint: editor de skins (liveries) para Assetto Corsa."""
-__version__ = "0.2.0"
+__version__ = "0.3.0"

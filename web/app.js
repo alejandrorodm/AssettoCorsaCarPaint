@@ -30,7 +30,8 @@ const status = (m) => ($('#ed-status').textContent = m || '');
 
 // ------------------------------------------------------------------ estado + rutas
 const S = { cars: [], car: null, carInfo: null, skins: [], skin: null, textures: [], tex: null, texInfo: null,
-  proj: null, canvas: null, W: 0, H: 0, hist: [], hpos: -1, loading: false, dirty: false, uvImg: null };
+  proj: null, canvas: null, W: 0, H: 0, hist: [], hpos: -1, loading: false, dirty: false, uvImg: null,
+  layout: '3d', inRender: false, noOutline: false, uvInfo: null };
 
 function route() {
   const h = location.hash.replace(/^#/, '') || 'cars';
@@ -190,6 +191,8 @@ async function openEditor(car, skin) {
   initCanvas();
   init3D();
   loadLibrary();
+  let lay = '3d'; try { lay = localStorage.getItem('acpaint.layout') || '3d'; } catch (e) { /* */ }
+  setLayout(lay);
   await load3DModel();
   if (first) { sel.value = first; await switchTexture(first); }
   else status('El coche no tiene texturas txDiffuse');
@@ -222,8 +225,10 @@ function initCanvas() {
   wrap.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
   const changed = () => { if (!S.loading) { pushHistory(); renderLayers(); scheduleLive(); S.dirty = true; } };
   c.on('object:added', changed); c.on('object:removed', changed); c.on('object:modified', changed);
-  c.on('selection:created', showProps); c.on('selection:updated', showProps); c.on('selection:cleared', showProps);
-  c.on('after:render', () => { if (!S.loading) scheduleLive(); });
+  const selChanged = () => { showProps(); scheduleLive(); };
+  c.on('selection:created', selChanged); c.on('selection:updated', selChanged); c.on('selection:cleared', selChanged);
+  // toCanvasElement (render en vivo) también dispara after:render: S.inRender evita el bucle
+  c.on('after:render', () => { if (!S.loading && !S.inRender) scheduleLive(); });
   c.on('path:created', (o) => { o.path.set({ name: 'Trazo', kind: 'brush' }); renderLayers(); });
 }
 function onResize() {
@@ -231,6 +236,17 @@ function onResize() {
   const wrap = $('#canvas-wrap'); S.canvas.setDimensions({ width: wrap.clientWidth, height: wrap.clientHeight });
   resize3D();
 }
+// ------------------------------------------------------------------ disposición: coche en grande (Forza) o textura en grande
+function setLayout(mode) {
+  const main = $('#main'), side = $('#side-top'), wrap = $('#canvas-wrap'), viewer = $('#viewer');
+  if (mode === '3d') { main.appendChild(viewer); side.appendChild(wrap); }
+  else { main.appendChild(wrap); side.appendChild(viewer); }
+  S.layout = mode; try { localStorage.setItem('acpaint.layout', mode); } catch (e) { /* */ }
+  $('#btn-swap').classList.toggle('active', mode === '3d');
+  onResize(); fitZoom();
+}
+$('#btn-swap').onclick = $('#btn-swap2').onclick = () => setLayout(S.layout === '3d' ? '2d' : '3d');
+
 function fitZoom() {
   const c = S.canvas; if (!c || !S.W) return;
   const z = Math.min((c.getWidth() - 30) / S.W, (c.getHeight() - 30) / S.H);
@@ -255,6 +271,12 @@ async function switchTexture(name) {
   catch (e) { S.texInfo = { width: 2048, height: 2048, format: '?' }; }
   S.W = S.texInfo.width; S.H = S.texInfo.height;
   const saved = S.proj.textures[name];
+  if (saved?.w && saved?.h) { S.W = saved.w; S.H = saved.h; }
+  else if (Math.max(S.W, S.H) <= 64) {
+    S.W = S.H = 2048;
+    toast(`${name} es una textura de color plano (${S.texInfo.width}×${S.texInfo.height}): lienzo ampliado a 2048×2048 para poder pintar vinilos`);
+  }
+  fillSizeSelect();
   $('#ed-base').value = saved?.base || 'orig';
   $('#ed-fmt').value = saved?.fmt || '';
   $('#ed-keepalpha').checked = saved ? saved.keep_alpha !== false : true;
@@ -267,8 +289,56 @@ async function switchTexture(name) {
   fitZoom(); renderLayers(); showProps(); scheduleLive(); updateUV();
   bind3DTexture();
   status(`${name} · ${S.W}×${S.H} · ${S.texInfo.format || ''} (${S.texInfo.source === 'kn5' ? 'del kn5, no está en la skin' : S.texInfo.source})`);
+  updateUVInfo();
 }
 $('#ed-texture').onchange = (e) => switchTexture(e.target.value);
+
+// tamaño del lienzo (= del DDS que se escribe). Las texturas de color plano se amplían para poder pintar.
+function fillSizeSelect() {
+  const ow = S.texInfo.width, oh = S.texInfo.height; const sel = $('#ed-size');
+  const opts = [['orig', `original (${ow}×${oh})`]];
+  for (const n of [1024, 2048, 4096]) if (!(n === ow && n === oh)) opts.push([String(n), `${n}×${n}`]);
+  if (!(S.W === ow && S.H === oh) && !opts.some(([v]) => v === String(S.W) && S.W === S.H)) opts.push([String(S.W), `${S.W}×${S.H}`]);
+  sel.innerHTML = opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+  sel.value = (S.W === ow && S.H === oh) ? 'orig' : String(S.W);
+}
+$('#ed-size').onchange = (e) => { const v = e.target.value; if (v === 'orig') resizeCanvas(S.texInfo.width, S.texInfo.height); else resizeCanvas(+v, +v); };
+function applyCanvasSize(w, h) {
+  const c = S.canvas; S.W = w; S.H = h;
+  c.clipPath = new fabric.Rect({ left: 0, top: 0, width: w, height: h, absolutePositioned: true });
+  const bg = c.backgroundImage; if (bg && bg.width) bg.set({ scaleX: w / bg.width, scaleY: h / bg.height });
+  fillSizeSelect();
+}
+/** Cambia el tamaño del lienzo escalando todas las capas para que el diseño se conserve. */
+function resizeCanvas(w, h) {
+  const c = S.canvas; if (!c || (w === S.W && h === S.H)) return;
+  const fx = w / S.W, fy = h / S.H;
+  for (const o of c.getObjects()) { o.set({ left: o.left * fx, top: o.top * fy, scaleX: o.scaleX * fx, scaleY: o.scaleY * fy }); o.setCoords(); }
+  applyCanvasSize(w, h);
+  fitZoom(); updateUV(); pushHistory(); scheduleLive(); S.dirty = true; renderLayers(); showProps();
+  status(`Lienzo ${w}×${h}`);
+}
+
+// diagnóstico del desplegado UV: ¿se pueden poner vinilos en esta textura?
+async function updateUVInfo() {
+  const b = $('#ed-uv'); b.hidden = true; const tex = S.tex; S.uvInfo = null;
+  try {
+    const u = await api(`/api/cars/${enc(S.car)}/uvinfo/${enc(tex)}`);
+    if (S.tex !== tex) return;
+    S.uvInfo = u;
+    const pct = (x) => (x * 100).toFixed(0) + ' %';
+    let cls = '', txt = '';
+    let tip = `${u.meshes} mallas · ${u.triangles} triángulos · cobertura ${pct(u.coverage)} · ${u.layers} capas · espejo ${pct(u.mirrored)}`;
+    if (u.encrypted_suspect) { cls = 'bad'; txt = '⚠ kn5 posiblemente cifrado: 3D y UV no fiables'; tip += ` · normales no unitarias ${pct(u.bad_normals)}. Los mods protegidos (cifrados) sólo se ven bien dentro de AC con CSP; aquí no se puede colocar sobre el 3D, sólo pintar en 2D.`; }
+    else if (u.triangles === 0) { cls = 'warn'; txt = 'UV: ninguna malla visible usa esta textura'; }
+    else if (u.degenerate) { cls = 'bad'; txt = 'UV ✗ sin desplegado: sólo se puede cambiar el color'; tip += '. Todas las mallas apuntan al mismo punto de la textura: cualquier dibujo se vería como un color uniforme. Para vinilos habría que re-desplegar el modelo (kn5), no basta una skin.'; }
+    else if (u.layers > 1.6 && u.mirrored > 0.25) { cls = 'warn'; txt = `UV ⚠ simétricas · ${pct(u.coverage)} del lienzo`; tip += '. Los dos lados del coche comparten la misma zona de textura: un vinilo aparece en ambos lados y en uno se ve invertido (usa formas simétricas o dorsales).'; }
+    else if (u.layers > 1.6) { cls = 'warn'; txt = `UV ⚠ solapadas · ${pct(u.coverage)} del lienzo`; tip += '. Varias mallas comparten la misma zona de textura: un vinilo puede repetirse en varias piezas.'; }
+    else txt = `UV ✓ ${pct(u.coverage)} del lienzo`;
+    if (Math.max(S.texInfo.width, S.texInfo.height) <= 64 && !u.degenerate && !u.encrypted_suspect) tip += ' · La textura original es de color plano, pero las UV están desplegadas: con el lienzo ampliado se pueden pintar vinilos en todo el coche.';
+    b.textContent = txt; b.title = tip; b.className = 'uvbadge ' + cls; b.hidden = false;
+  } catch (e) { /* sin diagnóstico */ }
+}
 $('#ed-base').onchange = async () => { await loadBase(); S.canvas.requestRenderAll(); S.dirty = true; };
 
 function loadBase() {
@@ -277,7 +347,7 @@ function loadBase() {
     if (src === 'none') { c.setBackgroundImage(null, () => { c.requestRenderAll(); res(); }); return; }
     fabric.Image.fromURL(texUrl(S.tex, src), (img) => {
       if (!img || !img.width) { c.setBackgroundImage(null, res); return; }
-      img.set({ scaleX: S.W / img.width, scaleY: S.H / img.height, originX: 'left', originY: 'top' });
+      img.set({ scaleX: S.W / img.width, scaleY: S.H / img.height, originX: 'left', originY: 'top', imageSmoothing: img.width >= 64 });
       c.setBackgroundImage(img, () => { c.requestRenderAll(); res(); });
     }, { crossOrigin: 'anonymous' });
   });
@@ -298,7 +368,7 @@ $('#chk-uv').onchange = updateUV;
 
 // ------------------------------------------------------------------ historial
 function pushHistory() {
-  const j = JSON.stringify(S.canvas.toJSON(PROPS_EXTRA));
+  const j = JSON.stringify({ w: S.W, h: S.H, c: S.canvas.toJSON(PROPS_EXTRA) });
   if (S.hist[S.hpos] === j) return;
   S.hist = S.hist.slice(0, S.hpos + 1); S.hist.push(j); if (S.hist.length > 60) S.hist.shift();
   S.hpos = S.hist.length - 1;
@@ -307,8 +377,10 @@ function restoreHistory(pos) {
   if (pos < 0 || pos >= S.hist.length) return;
   S.hpos = pos; S.loading = true;
   const bg = S.canvas.backgroundImage, ov = S.canvas.overlayImage, clip = S.canvas.clipPath;
-  S.canvas.loadFromJSON(S.hist[pos], () => {
+  const h = JSON.parse(S.hist[pos]);
+  S.canvas.loadFromJSON(h.c, () => {
     S.canvas.backgroundImage = bg; S.canvas.overlayImage = ov; S.canvas.clipPath = clip;
+    if (h.w && (h.w !== S.W || h.h !== S.H)) { applyCanvasSize(h.w, h.h); fitZoom(); updateUV(); }
     S.loading = false; S.canvas.requestRenderAll(); renderLayers(); showProps(); scheduleLive();
   });
 }
@@ -402,6 +474,10 @@ function renderLibrary() {
   $('#lib-list').innerHTML = html || '<span class="hint">vacío</span>';
   for (const el of $$('#lib-list .item')) {
     el.onclick = () => libClick(el.dataset.type, el.dataset.n, el);
+    if (el.dataset.type !== 'upload') {
+      el.draggable = true;
+      el.ondragstart = (e) => { e.dataTransfer.setData('text/acpaint', JSON.stringify({ type: el.dataset.type, name: el.dataset.n })); e.dataTransfer.effectAllowed = 'copy'; };
+    }
     const del = el.querySelector('.del');
     if (del) del.onclick = async (e) => { e.stopPropagation(); if (!confirm(`¿Borrar ${el.dataset.n} de la biblioteca?`)) return; await api(libImgUrl(el.dataset.n), { method: 'DELETE' }); await refreshImages(); renderLibrary(); };
   }
@@ -421,7 +497,7 @@ function libClick(type, name, el) {
   }
   addFromLibrary(type, name);
 }
-function disarm() { S.armed = null; $('#viewer').classList.remove('armed'); for (const x of $$('#lib-list .item')) x.classList.remove('armed'); }
+function disarm() { S.armed = null; $('#viewer').classList.remove('armed'); $('#v3d').classList.remove('place'); for (const x of $$('#lib-list .item')) x.classList.remove('armed'); }
 
 /** Añade un elemento de la biblioteca al lienzo centrado en (x, y) (por defecto el centro). */
 function addFromLibrary(type, name, x = S.W / 2, y = S.H / 2, cb) {
@@ -489,6 +565,13 @@ function setupDrops() {
     el.addEventListener('dragleave', () => el.classList.remove('dragover'));
     el.addEventListener('drop', async (e) => {
       e.preventDefault(); el.classList.remove('dragover'); if (!S.canvas) return;
+      const lib = e.dataTransfer.getData('text/acpaint');
+      if (lib) {
+        const a = JSON.parse(lib);
+        if (el === wrap) { const p = S.canvas.getPointer(e); addFromLibrary(a.type, a.name, p.x, p.y); }
+        else { const uv = pickUV(e); if (!uv) return status('Suelta el vinilo sobre una pieza del coche que use la textura en edición'); placeOnCar(a.type, a.name, uv, () => pushHistory()); }
+        return;
+      }
       const files = [...e.dataTransfer.files]; if (!files.length) return;
       let x, y;
       if (el === wrap) { const p = S.canvas.getPointer(e); x = p.x; y = p.y; }
@@ -504,38 +587,146 @@ function setupDrops() {
 }
 setupDrops();
 
-// ------------------------------------------------------------------ interacción con el coche 3D
+// ------------------------------------------------------------------ interacción con el coche 3D (estilo Forza)
 const RAY = new THREE.Raycaster();
+const movable = (o) => !!o && o.kind !== 'base' && !o.locked && !o.lockMovementX;
+function liveMeshes() { const m = []; V.model.traverse((o) => { if (o.isMesh && o.material.userData?.live) m.push(o); }); return m; }
+/** Punto de la textura (píxeles) bajo el cursor, sólo sobre mallas que usan la textura en edición. */
 function pickUV(e) {
   if (!V.model || !S.W) return null;
   const cv = $('#v3d'); const r = cv.getBoundingClientRect();
   RAY.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), V.camera);
-  const meshes = []; V.model.traverse((m) => { if (m.isMesh && m.material.userData?.live) meshes.push(m); });
-  const hit = RAY.intersectObjects(meshes, false).find((h) => h.uv);
+  const hit = RAY.intersectObjects(liveMeshes(), false).find((h) => h.uv);
   if (!hit) return null;
   return { x: hit.uv.x * S.W, y: hit.uv.y * S.H, hit };
 }
-function objectAt(x, y) {
-  const pt = new fabric.Point(x, y);
-  return S.canvas.getObjects().slice().reverse().find((o) => o.visible && !o.locked && o.containsPoint(pt, null, true));
+/** Marco local de la superficie en el triángulo tocado: cómo se ve un vector del mundo en píxeles de la
+ *  textura. Devuelve {angle, flipY, pxPerM} para que un vinilo salga derecho respecto a la cámara y con su
+ *  tamaño real en el coche, o null si las UV del triángulo son degeneradas. */
+function surfaceFrame(hit) {
+  const g = hit.object.geometry, pos = g.attributes.position, uv = g.attributes.uv, f = hit.face;
+  if (!f || !uv) return null;
+  const P = (i) => new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(hit.object.matrixWorld);
+  const p0 = P(f.a), p1 = P(f.b), p2 = P(f.c);
+  const u0 = uv.getX(f.a), v0 = uv.getY(f.a);
+  const du1 = uv.getX(f.b) - u0, dv1 = uv.getY(f.b) - v0, du2 = uv.getX(f.c) - u0, dv2 = uv.getY(f.c) - v0;
+  const det = du1 * dv2 - du2 * dv1;
+  if (Math.abs(det) < 1e-12) return null;
+  const e1 = p1.clone().sub(p0), e2 = p2.clone().sub(p0);
+  const T = e1.clone().multiplyScalar(dv2).sub(e2.clone().multiplyScalar(dv1)).divideScalar(det);   // dP/du
+  const B = e2.clone().multiplyScalar(du1).sub(e1.clone().multiplyScalar(du2)).divideScalar(det);   // dP/dv
+  const n = e1.clone().cross(e2).normalize();
+  const TT = T.dot(T), TB = T.dot(B), BB = B.dot(B), G = TT * BB - TB * TB;
+  if (!(G > 1e-18)) return null;
+  // mínimos cuadrados: vector del mundo -> (du, dv) -> píxeles
+  const toPx = (w) => { const a = T.dot(w), b = B.dot(w); return { x: ((BB * a - TB * b) / G) * S.W, y: ((TT * b - TB * a) / G) * S.H }; };
+  const proj = (w) => w.sub(n.clone().multiplyScalar(w.dot(n)));
+  let right = proj(new THREE.Vector3(1, 0, 0).applyQuaternion(V.camera.quaternion));
+  let up = proj(new THREE.Vector3(0, 1, 0).applyQuaternion(V.camera.quaternion));
+  if (right.lengthSq() < 1e-6) right = up.clone().cross(n);          // superficie vista de canto
+  if (up.lengthSq() < 1e-6) up = n.clone().cross(right);
+  right.normalize(); up.normalize();
+  const r = toPx(right), u = toPx(up);
+  const pxPerM = Math.hypot(r.x, r.y);
+  if (!(pxPerM > 1e-6) || !isFinite(pxPerM)) return null;
+  const angle = Math.atan2(r.y, r.x) * 180 / Math.PI;
+  const flipY = (r.x * u.y - r.y * u.x) > 0;   // en la textura (y hacia abajo) "arriba" debe quedar a -90° de "derecha"; si no, la isla UV está en espejo
+  return { angle, flipY, pxPerM };
 }
-function setup3DClicks() {
-  const cv = $('#v3d'); let down = null;
-  cv.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY }; });
-  cv.addEventListener('pointerup', (e) => {
-    if (!down) return; const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4; down = null;
-    if (moved || e.button !== 0 || !S.canvas) return;
-    const uv = pickUV(e);
-    if (!uv) { status('Ese punto no usa la textura en edición'); return; }
-    if (S.armed) { const a = S.armed; addFromLibrary(a.type, a.name, uv.x, uv.y); if (!e.ctrlKey) disarm(); status(`Colocado en (${Math.round(uv.x)}, ${Math.round(uv.y)})`); return; }
-    const act = S.canvas.getActiveObject();
-    if (e.shiftKey && act) { act.set({ left: uv.x, top: uv.y }); act.setCoords(); S.canvas.requestRenderAll(); pushHistory(); scheduleLive(); showProps(); return; }
-    const o = objectAt(uv.x, uv.y);
-    if (o) { S.canvas.setActiveObject(o); S.canvas.requestRenderAll(); status(`Capa: ${o.name || o.type}`); }
-    else { S.canvas.discardActiveObject(); S.canvas.requestRenderAll(); status(`UV (${Math.round(uv.x)}, ${Math.round(uv.y)}) sin capa`); }
+/** Coloca un elemento de la biblioteca sobre el coche en el punto tocado: orientado como se ve desde la
+ *  cámara (aunque la isla UV esté girada o en espejo) y con la anchura en cm elegida. */
+function placeOnCar(type, name, uv, cb) {
+  const fr = uv.hit ? surfaceFrame(uv.hit) : null;
+  addFromLibrary(type, name, uv.x, uv.y, (obj) => {
+    if (fr && type !== 'pattern') {
+      const cm = +$('#lib-size3d').value || 50;
+      const px = Math.min(S.W * 2, Math.max(4, (cm / 100) * fr.pxPerM));
+      const sc = px / obj.width;
+      obj.set({ scaleX: sc, scaleY: sc, angle: (fr.angle + 360) % 360, flipY: fr.flipY });
+      obj.setCoords(); S.canvas.requestRenderAll(); scheduleLive();
+    }
+    cb && cb(obj);
   });
 }
-setup3DClicks();
+function objectAt(x, y) {
+  const pt = new fabric.Point(x, y);
+  const objs = S.canvas.getObjects().slice().reverse().filter((o) => o.visible && !o.locked && o.containsPoint(pt, null, true));
+  return objs.find((o) => o.kind !== 'base') || objs[0];
+}
+function setup3DInteraction() {
+  const cv = $('#v3d'); let drag = null, down = null, hoverT = 0, wheelT = null;
+  const startDrag = (obj, uv, pointerId) => {
+    drag = { obj, dx: obj.left - uv.x, dy: obj.top - uv.y, last: uv, moved: false, id: pointerId, evt: null, raf: 0 };
+    V.controls.enabled = false; try { cv.setPointerCapture(pointerId); } catch (err) { /* */ }
+    cv.classList.add('dragging');
+  };
+  const nudge = (o, fn) => { fn(o); o.setCoords(); S.canvas.requestRenderAll(); liveNow(); showProps(); S.dirty = true; clearTimeout(wheelT); wheelT = setTimeout(pushHistory, 400); };
+  // en fase de captura: si empezamos a arrastrar una capa, OrbitControls (enabled=false) no orbita
+  cv.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || !S.canvas) return;
+    down = { x: e.clientX, y: e.clientY };
+    const uv = pickUV(e);
+    if (!uv) return;                                   // fondo o pieza sin esta textura: orbitar
+    if (S.armed) {
+      const a = S.armed; if (!e.ctrlKey) disarm();
+      V.controls.enabled = false; drag = { pending: e.pointerId };
+      placeOnCar(a.type, a.name, uv, (obj) => {
+        pushHistory(); status(`${obj.name || a.name} colocado en (${Math.round(uv.x)}, ${Math.round(uv.y)}) · arrástralo, Ctrl+rueda: tamaño, Mayús+rueda: girar`);
+        if (drag && drag.pending !== undefined) startDrag(obj, uv, drag.pending);   // sigue pulsado: arrastra el recién colocado
+      });
+      return;
+    }
+    const act = S.canvas.getActiveObject();
+    if (e.shiftKey && movable(act)) { act.set({ left: uv.x, top: uv.y }); act.setCoords(); S.canvas.requestRenderAll(); startDrag(act, uv, e.pointerId); drag.moved = true; return; }
+    const o = objectAt(uv.x, uv.y);
+    if (!o) { if (act) { S.canvas.discardActiveObject(); S.canvas.requestRenderAll(); } return; }
+    if (act !== o) { S.canvas.setActiveObject(o); S.canvas.requestRenderAll(); status(`Capa: ${o.name || o.type}`); }
+    if (movable(o)) startDrag(o, uv, e.pointerId);
+  }, true);
+  const processDrag = () => {
+    if (!drag || !drag.obj) return;
+    drag.raf = 0; const e = drag.evt; if (!e) return;
+    const uv = pickUV(e); if (!uv) return;
+    // salto grande en la textura = otra isla UV: el objeto pasa a quedar justo bajo el cursor
+    if (Math.hypot(uv.x - drag.last.x, uv.y - drag.last.y) > 0.15 * Math.max(S.W, S.H)) { drag.dx = 0; drag.dy = 0; }
+    drag.last = uv; drag.moved = true;
+    drag.obj.set({ left: uv.x + drag.dx, top: uv.y + drag.dy }); drag.obj.setCoords(); S.canvas.requestRenderAll(); liveNow();
+  };
+  cv.addEventListener('pointermove', (e) => {
+    if (drag && drag.obj) { drag.evt = e; if (!drag.raf) drag.raf = requestAnimationFrame(processDrag); return; }
+    if (drag) return;
+    const now = performance.now(); if (now - hoverT < 80) return; hoverT = now;
+    if (S.armed) { cv.classList.add('place'); cv.classList.remove('over'); return; }
+    cv.classList.remove('place');
+    if (e.buttons || !S.canvas) return;
+    const uv = pickUV(e); const o = uv && objectAt(uv.x, uv.y);
+    cv.classList.toggle('over', movable(o));
+  });
+  const end = (e) => {
+    if (drag) {
+      if (drag.obj) {
+        try { cv.releasePointerCapture(drag.id); } catch (err) { /* */ }
+        if (drag.moved) { pushHistory(); S.dirty = true; showProps(); scheduleLive(); }
+      }
+      drag = null; down = null; V.controls.enabled = true; cv.classList.remove('dragging'); return;
+    }
+    if (!down) return;
+    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4; down = null;
+    if (moved || e.button !== 0 || !S.canvas) return;
+    if (!pickUV(e) && S.canvas.getActiveObject()) { S.canvas.discardActiveObject(); S.canvas.requestRenderAll(); }
+  };
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+  // Ctrl+rueda: tamaño de la capa seleccionada · Mayús+rueda: girarla (sin modificador, OrbitControls hace zoom)
+  cv.addEventListener('wheel', (e) => {
+    if (!(e.ctrlKey || e.shiftKey) || !S.canvas) return;
+    const o = S.canvas.getActiveObject(); if (!movable(o)) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const up = (e.deltaY || e.deltaX) < 0;
+    if (e.ctrlKey) nudge(o, (t) => { const f = up ? 1.08 : 1 / 1.08; t.set({ scaleX: t.scaleX * f, scaleY: t.scaleY * f }); });
+    else nudge(o, (t) => t.rotate(((t.angle || 0) + (up ? -5 : 5) + 360) % 360));
+  }, { capture: true, passive: false });
+}
+setup3DInteraction();
 
 // ------------------------------------------------------------------ capas
 const ICON = { base: '🎨', shape: '◆', text: 'T', image: '🖼', brush: '✏' };
@@ -664,6 +855,12 @@ document.addEventListener('keydown', (e) => {
   else if (e.ctrlKey && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicate(); }
   else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSel(); }
   else if (e.key === 'Escape') { disarm(); if (S.canvas.isDrawingMode) toggleBrush(false); S.canvas.discardActiveObject(); S.canvas.requestRenderAll(); }
+  else if (['+', '-', '[', ']'].includes(e.key)) {
+    const o = S.canvas.getActiveObject(); if (!movable(o)) return; e.preventDefault();
+    if (e.key === '+' || e.key === '-') { const f = e.key === '+' ? 1.05 : 1 / 1.05; o.set({ scaleX: o.scaleX * f, scaleY: o.scaleY * f }); }
+    else o.rotate(((o.angle || 0) + (e.key === ']' ? 5 : -5) + 360) % 360);
+    o.setCoords(); S.canvas.requestRenderAll(); pushHistory(); scheduleLive(); showProps();
+  }
   else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
     const o = S.canvas.getActiveObject(); if (!o) return; e.preventDefault();
     const d = e.shiftKey ? 10 : 1; o.set({ left: o.left + (e.key === 'ArrowRight' ? d : e.key === 'ArrowLeft' ? -d : 0), top: o.top + (e.key === 'ArrowDown' ? d : e.key === 'ArrowUp' ? -d : 0) });
@@ -673,19 +870,30 @@ document.addEventListener('keydown', (e) => {
 
 // ------------------------------------------------------------------ render de la textura
 function renderTexture(scale = 1) {
-  const c = S.canvas; const ov = c.overlayImage; const act = c.getActiveObject();
-  c.overlayImage = null; if (act) c.discardActiveObject();
+  const c = S.canvas; const ov = c.overlayImage;
+  c.overlayImage = null; S.inRender = true;      // toCanvasElement ya renderiza sin controles (interactive=false)
   const vpt = c.viewportTransform, zoom = c.getZoom();
-  const el = c.toCanvasElement(scale / zoom, { left: vpt[4], top: vpt[5], width: S.W * zoom, height: S.H * zoom });
-  c.overlayImage = ov; if (act) c.setActiveObject(act); c.requestRenderAll();
-  return el;
+  try { return c.toCanvasElement(scale / zoom, { left: vpt[4], top: vpt[5], width: S.W * zoom, height: S.H * zoom }); }
+  finally { c.overlayImage = ov; S.inRender = false; }
 }
-let liveT = null;
+let liveT = null, liveRAF = 0;
 function scheduleLive() { clearTimeout(liveT); liveT = setTimeout(updateLive, 120); }
+function liveNow() { if (!liveRAF) liveRAF = requestAnimationFrame(() => { liveRAF = 0; updateLive(); }); }
 function updateLive() {
   if (!S.canvas || !V.liveTex || !S.W) return;
   const scale = Math.min(1, 1024 / Math.max(S.W, S.H));
-  V.liveTex.image = renderTexture(scale); V.liveTex.needsUpdate = true;
+  const el = renderTexture(scale);
+  const act = S.noOutline ? null : S.canvas.getActiveObject();
+  if (act && act.kind !== 'base') drawOutline(el, act, scale);
+  V.liveTex.image = el; V.liveTex.needsUpdate = true;
+}
+/** Contorno de la capa seleccionada sobre el coche (sólo en la vista 3D, nunca en el DDS ni en la preview). */
+function drawOutline(el, o, scale) {
+  const k = o.aCoords || o.calcACoords(); const pts = [k.tl, k.tr, k.br, k.bl];
+  const ctx = el.getContext('2d'); ctx.save(); ctx.beginPath();
+  pts.forEach((p, i) => ctx[i ? 'lineTo' : 'moveTo'](p.x * scale, p.y * scale)); ctx.closePath();
+  ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.stroke();
+  ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]); ctx.strokeStyle = '#ff7a1a'; ctx.stroke(); ctx.restore();
 }
 
 // ------------------------------------------------------------------ guardar
@@ -714,6 +922,7 @@ $('#btn-restore').onclick = async () => {
 $('#btn-export-png').onclick = () => { const a = document.createElement('a'); a.href = renderTexture(1).toDataURL('image/png'); a.download = S.tex.replace(/\.dds$/i, '') + '.png'; a.click(); };
 $('#btn-preview').onclick = async () => {
   if (!V.model) return toast('Aún no hay modelo 3D', true);
+  S.noOutline = true; updateLive();
   try {
     const png = await render3DShot(1022, 576);
     await api(`/api/cars/${enc(S.car)}/skins/${enc(S.skin)}/preview`, { method: 'PUT', body: png });
@@ -721,6 +930,7 @@ $('#btn-preview').onclick = async () => {
     await api(`/api/cars/${enc(S.car)}/skins/${enc(S.skin)}/livery`, { method: 'PUT', body: liv });
     toast('preview.jpg y livery.png generados');
   } catch (e) { toast(e.message, true); }
+  S.noOutline = false; updateLive();
 };
 window.addEventListener('beforeunload', (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -810,4 +1020,5 @@ async function render3DShot(w, h) {
 }
 
 // ------------------------------------------------------------------ arranque
+window.ACP = { S, V, fabric, THREE };   // acceso desde la consola / pruebas
 loadSettings().then(route);

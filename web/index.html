@@ -5,7 +5,7 @@
 <title>AC Car Paint — editor de skins</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/web/style.css?v=2">
+<link rel="stylesheet" href="/web/style.css?v=3">
 <script src="/web/vendor/fabric.min.js"></script>
 <script type="importmap">
 {"imports": {"three": "/web/vendor/three/build/three.module.js", "three/addons/": "/web/vendor/three/examples/jsm/"}}
@@ -56,10 +56,13 @@
         <option value="none">ninguna (transparente)</option>
       </select>
     </label>
+    <label title="Tamaño del lienzo/DDS que se escribirá. Las texturas de color plano (1×1, 4×4…) se amplían para poder pintar vinilos">Lienzo <select id="ed-size"></select></label>
     <button id="btn-undo" title="Deshacer (Ctrl+Z)">↶</button>
     <button id="btn-redo" title="Rehacer (Ctrl+Y)">↷</button>
     <button id="btn-fit" title="Ajustar zoom">⤢</button>
     <label class="chk"><input type="checkbox" id="chk-uv"> UV</label>
+    <button id="btn-swap" title="Intercambiar: coche en grande (modo Forza) / textura en grande">⇄ 3D/2D</button>
+    <span id="ed-uv" class="uvbadge" hidden></span>
     <div class="spacer"></div>
     <span id="ed-status" class="hint"></span>
     <button id="btn-preview" title="Genera preview.jpg y livery.png con la vista 3D">📷 Preview</button>
@@ -97,7 +100,10 @@
         <div class="row lib-colors">
           <label>Color 1 <input type="color" id="lib-c1" value="#ffffff"></label>
           <label>Color 2 <input type="color" id="lib-c2" value="#1a1a1a"></label>
-          <label class="chk" title="Tras elegir un elemento, haz clic sobre el coche en 3D para colocarlo justo ahí"><input type="checkbox" id="chk-place3d"> colocar en 3D</label>
+          <label class="chk" title="Tras elegir un elemento, haz clic sobre el coche en 3D para colocarlo justo ahí (también puedes arrastrarlo directamente al coche)"><input type="checkbox" id="chk-place3d" checked> colocar en 3D</label>
+        </div>
+        <div class="row lib-colors">
+          <label title="Anchura aproximada que tendrá el vinilo sobre la carrocería al colocarlo en 3D">Tamaño en el coche (cm) <input type="number" id="lib-size3d" min="2" max="500" step="5" value="50"></label>
         </div>
         <div id="lib-list" class="decals"></div>
         <p class="hint" id="lib-hint">Clic: añade como capa. Con una forma seleccionada, clic en una textura la usa como relleno. Arrastra o pega (Ctrl+V) imágenes al lienzo.</p>
@@ -106,15 +112,19 @@
       <div id="layers" class="layers"></div>
     </aside>
 
-    <div class="canvas-wrap" id="canvas-wrap">
-      <canvas id="c"></canvas>
-      <div class="canvas-hint">rueda: zoom · botón central / Alt+arrastrar: mover · Supr: borrar · Ctrl+D: duplicar</div>
+    <div class="main" id="main">
+      <div class="canvas-wrap" id="canvas-wrap">
+        <canvas id="c"></canvas>
+        <div class="canvas-hint">rueda: zoom · botón central / Alt+arrastrar: mover · Supr: borrar · Ctrl+D: duplicar</div>
+      </div>
     </div>
 
     <aside class="panel right">
+      <div class="side-top" id="side-top">
       <div id="viewer" class="viewer">
         <canvas id="v3d"></canvas>
         <div class="viewer-bar">
+          <button id="btn-swap2" title="Intercambiar 3D/2D">⇄</button>
           <button id="btn-rot" title="Giro automático">🔄</button>
           <button id="btn-cam-front" title="Vista frontal">F</button>
           <button id="btn-cam-side" title="Vista lateral">L</button>
@@ -122,7 +132,8 @@
           <button id="btn-cam-rear" title="Vista trasera">R</button>
           <span id="v3d-status" class="hint"></span>
         </div>
-        <div class="viewer-hint hint">clic en el coche: seleccionar capa · Mayús+clic: mover la capa seleccionada ahí · arrastrar aquí una imagen: colocarla</div>
+        <div class="viewer-hint hint">arrastra una capa sobre el coche para moverla · Ctrl+rueda: tamaño · Mayús+rueda: girar · arrastra un vinilo de la biblioteca hasta el coche · fondo: orbitar</div>
+      </div>
       </div>
       <div id="props" class="props">
         <h3>Propiedades</h3>
@@ -243,6 +254,6 @@
 </dialog>
 
 <div id="toast" hidden></div>
-<script type="module" src="/web/app.js?v=2"></script>
+<script type="module" src="/web/app.js?v=3"></script>
 </body>
 </html>
